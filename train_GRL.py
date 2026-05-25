@@ -259,6 +259,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         # Add classifier params to the optimizer's param groups (no weight decay).
         optimizer.add_param_group({'params': list(classifier_head.parameters()), 'weight_decay': 0.0,
                                    'initial_lr': hyp['lr0']})
+        # Keep scheduler in sync — LambdaLR zips lr_lambdas with param_groups at step().
+        scheduler.lr_lambdas.append(lf)
         # Resolve target path (relative paths are joined with data_dict['path']).
         target_path = resolve_da_path(data_dict['target'], data_dict.get('path'))
         target_loader = create_target_dataloader(
