@@ -11,12 +11,17 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
+_DEFAULT_ALPHA: float | None = None
+
 
 def default_alpha() -> float:
     """alpha = BCE-with-logits([0.7, 0.3], [1.0, 0.0])  (DA-Detect's bce constant)."""
-    pred = torch.tensor([[0.7, 0.3]])
-    label = torch.tensor([[1.0, 0.0]])
-    return F.binary_cross_entropy_with_logits(pred, label).item()
+    global _DEFAULT_ALPHA
+    if _DEFAULT_ALPHA is None:
+        pred = torch.tensor([[0.7, 0.3]])
+        label = torch.tensor([[1.0, 0.0]])
+        _DEFAULT_ALPHA = F.binary_cross_entropy_with_logits(pred, label).item()
+    return _DEFAULT_ALPHA
 
 
 def compute_lambda_adv(L_c: float, lambda_0: float = 0.1, alpha: float = None,

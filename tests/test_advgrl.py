@@ -37,10 +37,14 @@ def test_cap_at_lambda_0_times_beta():
 
 
 def test_alpha_boundary():
-    """At L_c == alpha, the function takes the hard-regime branch."""
+    """At L_c == alpha, the function takes the hard-regime branch (<= comparison, not <)."""
     v_at = compute_lambda_adv(ALPHA, LAMBDA_0, ALPHA, BETA)
     v_above = compute_lambda_adv(ALPHA + 1e-6, LAMBDA_0, ALPHA, BETA)
-    assert v_at != v_above or math.isclose(v_at, LAMBDA_0, rel_tol=1e-3)
+    # At the boundary, hard branch fires: v_at = lambda_0 * (1/alpha) > lambda_0.
+    assert v_at > LAMBDA_0
+    assert math.isclose(v_at, LAMBDA_0 * (1.0 / ALPHA), rel_tol=1e-3)
+    # Just above, easy branch fires: v_above == lambda_0 exactly.
+    assert v_above == LAMBDA_0
 
 
 def test_always_le_lambda_0_times_beta():
