@@ -255,13 +255,18 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             classifier_head.load_state_dict(classifier_state_to_load)
             LOGGER.info(f'{colorstr("DA: ")}restored classifier head from checkpoint')
         # Add classifier params to the optimizer's param groups (no weight decay).
-        optimizer.add_param_group({'params': list(classifier_head.parameters()), 'weight_decay': 0.0})
+        optimizer.add_param_group({'params': list(classifier_head.parameters()), 'weight_decay': 0.0,
+                                   'initial_lr': hyp['lr0']})
         # Resolve target path (relative paths are joined with data_dict['path']).
         target_path = resolve_da_path(data_dict['target'], data_dict.get('path'))
         target_loader = create_target_dataloader(
             target_path, imgsz, batch_size // WORLD_SIZE, gs, workers=workers, prefix=colorstr('target: '),
         )
     # ----------------------------------------------------------------------------
+
+    # DA logger writes runs/.../da_losses.csv whenever any DA flag is on.
+    from utils.da_logger import DALogger
+    da_logger = DALogger(save_dir=str(save_dir)) if (opt.da_img or opt.triplet_img) else None
 
     # Process 0
     if RANK in [-1, 0]:
@@ -422,18 +427,30 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 det_pred, backbone_feat = model(all_imgs)
                 # Slice predictions to source rows only for the detection loss.
                 det_pred_src = [p[:B_s] for p in det_pred]
+                loss_ori = None
                 if compute_loss_ota is not None:
                     loss, loss_items = compute_loss_ota(det_pred_src, targets.to(device), imgs)
                 else:
                     loss_ori, loss_items = compute_loss(det_pred_src, targets.to(device))  # loss scaled by batch_size
                     loss = loss_ori
 
+                lambda_adv_this_iter = None
+                L_c_this_iter = None
+                loss_da_image_this_iter = None
                 if classifier_head is not None:
-                    # Fixed-lambda GRL pass (PR 3 will replace with two-pass AdvGRL).
-                    feat_grl = gradient_scalar(backbone_feat, -opt.da_img_grl_weight)
-                    da_logits = classifier_head(feat_grl)
-                    loss_da_image = da_img_loss(da_logits, source_count=B_s)
+                    from utils.advgrl import advgrl_step, default_alpha
+                    B_t = t_imgs.size(0)
+                    st_feat = backbone_feat[:B_s + B_t]
+                    alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
+                    loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
+                        st_feat, source_count=B_s, classifier=classifier_head,
+                        use_advgrl=opt.advgrl, lambda_0=opt.da_img_grl_weight,
+                        alpha=alpha, beta=opt.advgrl_threshold,
+                    )
+                    loss_da_image_this_iter = loss_da_image
                     loss = loss + opt.da_img_weight * loss_da_image
+                    # Cap invariant — fail fast if compute_lambda_adv is buggy.
+                    assert lambda_adv_this_iter <= opt.da_img_grl_weight * opt.advgrl_threshold + 1e-6
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -442,6 +459,18 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
             # Backward
             scaler.scale(loss).backward()
+
+            # DA per-iter logging
+            if da_logger is not None:
+                _det_loss = loss_ori if loss_ori is not None else loss
+                da_logger.log(
+                    epoch=epoch,
+                    iter=ni,
+                    loss_det=float(_det_loss.item()),
+                    loss_da_image=float(loss_da_image_this_iter.item()) if loss_da_image_this_iter is not None else '',
+                    lambda_adv=lambda_adv_this_iter if lambda_adv_this_iter is not None else '',
+                    L_c=L_c_this_iter if L_c_this_iter is not None else '',
+                )
 
             # Optimize
             if ni - last_opt_step >= accumulate:
