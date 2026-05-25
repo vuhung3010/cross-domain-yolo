@@ -496,8 +496,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     return
             # end batch ------------------------------------------------------------------------------------------------
 
-        # Scheduler
-        lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
+        # Scheduler — only the first 3 param groups feed loggers (x/lr0..lr2 columns).
+        # Extra groups (e.g. DA classifier) follow the same lf schedule and are excluded.
+        lr = [x['lr'] for x in optimizer.param_groups[:3]]  # for loggers
         scheduler.step()
 
         if RANK in [-1, 0]:
