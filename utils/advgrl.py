@@ -10,6 +10,10 @@ See spec §2.1.
 from __future__ import annotations
 import torch
 import torch.nn.functional as F
+from torch import nn
+
+from utils.domain_grl import gradient_scalar
+from utils.domain_loss import da_img_loss
 
 _DEFAULT_ALPHA: float | None = None
 
@@ -24,7 +28,7 @@ def default_alpha() -> float:
     return _DEFAULT_ALPHA
 
 
-def compute_lambda_adv(L_c: float, lambda_0: float = 0.1, alpha: float = None,
+def compute_lambda_adv(L_c: float, lambda_0: float = 0.1, alpha: float | None = None,
                        beta: float = 30.0, eps: float = 1e-7) -> float:
     """Compute the AdvGRL effective weight for this iter.
 
@@ -46,11 +50,6 @@ def compute_lambda_adv(L_c: float, lambda_0: float = 0.1, alpha: float = None,
         adv_threshold = min(beta, 1.0 / (L_c + eps))
         return lambda_0 * adv_threshold
     return lambda_0
-
-
-from torch import nn
-from utils.domain_grl import gradient_scalar
-from utils.domain_loss import da_img_loss
 
 
 def advgrl_step(
@@ -81,7 +80,7 @@ def advgrl_step(
     # Pass 1: detached — compute scalar L_c for AdvGRL gating.
     pred_detached = classifier(backbone_feat.detach())
     L_c_tensor = da_img_loss(pred_detached, source_count=source_count)
-    L_c = float(L_c_tensor.item())
+    L_c = L_c_tensor.item()
 
     # Decide lambda_adv.
     if use_advgrl:

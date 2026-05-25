@@ -94,3 +94,29 @@ def test_advgrl_step_fixed_lambda_when_off():
         use_advgrl=False, lambda_0=0.07, alpha=default_alpha(), beta=30.0,
     )
     assert lambda_adv == 0.07
+
+
+def test_advgrl_step_gradient_flows_back_advgrl_on():
+    """Backprop reaches backbone_feat with use_advgrl=True (sign-flipped, possibly amplified)."""
+    head = DAImgHead(in_channels=64)
+    feat = torch.randn(4, 64, 2, 2, requires_grad=True)
+    loss, _, _ = advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=True, lambda_0=0.1, alpha=default_alpha(), beta=30.0,
+    )
+    loss.backward()
+    assert feat.grad is not None
+    assert feat.grad.abs().sum() > 0
+
+
+def test_advgrl_step_hard_regime_triggers():
+    """When alpha is large enough that L_c <= alpha, hard regime fires and lambda_adv > lambda_0."""
+    head = DAImgHead(in_channels=64)
+    feat = torch.randn(4, 64, 2, 2)
+    # alpha=1.0 forces hard regime even with random-init classifier (L_c ≈ ln(2) ≈ 0.693).
+    _, lambda_adv, L_c = advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=True, lambda_0=0.1, alpha=1.0, beta=30.0,
+    )
+    assert L_c < 1.0, f"expected L_c in hard regime, got {L_c}"
+    assert lambda_adv > 0.1, f"expected hard-regime lambda > lambda_0, got {lambda_adv}"
