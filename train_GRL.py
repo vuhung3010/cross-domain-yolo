@@ -38,7 +38,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-import val  # for end-of-epoch mAP
+import val_GRL as val  # for end-of-epoch mAP — patched for dumb-model tuple shape
 from models.experimental import attempt_load
 from models.yolo_GRL import Model  # GRL-aware model: forward returns (det_pred, backbone_feat)
 from utils.autoanchor import check_anchors
