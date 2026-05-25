@@ -193,7 +193,9 @@ def run(data,
 
         # Inference
         if not otaloss =='yolox':
-            (out, train_out),_ = model(im) if training else model(im, augment=augment, val=True)  # inference, loss outputs
+            # Model.forward returns ((inference_out, train_out), backbone_feat) in eval mode after
+            # the dumb-model refactor. backbone_feat is unused at eval time — discarded via _.
+            (out, train_out), _ = model(im) if training else model(im, augment=augment, val=True)  # inference, loss outputs
             dt[1] += time_sync() - t2
             if compute_loss:
                 if otaloss =='yolov7':
