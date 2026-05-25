@@ -572,7 +572,7 @@ def parse_opt(known=False):
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
     parser.add_argument('--cfg', type=str, default=ROOT / 'configs/yolov5-standard/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/domain/tank.yaml', help='dataset.yaml path')
-    parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    parser.add_argument('--hyp', type=str, default=ROOT / 'hyps/hyp.scratch-low.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=1)
 
     parser.add_argument('--loss', type=str, default='origin', help='')
