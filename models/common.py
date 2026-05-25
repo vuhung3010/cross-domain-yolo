@@ -767,25 +767,21 @@ class Classify(nn.Module):
 
 
 class Classifyy(nn.Module):
-    # Classification head, i.e. x(b,c1,20,20) to x(b,c2)
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
+    """Domain classifier head (pure Conv->ReLU->Conv).
+
+    No baked GRL — gradient reversal happens externally via utils.domain_grl.gradient_scalar.
+    Kept for backwards compatibility with old YAMLs; new code should import DAImgHead
+    from models.da_classifier instead.
+    """
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1):
         super().__init__()
-        # self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
-        self.conv1 = nn.Conv2d(c1,512,1,1)
+        self.conv1 = nn.Conv2d(c1, 512, 1, 1)
         self.act = nn.ReLU()
-        # self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g)  # to x(b,c2,1,1)
-        self.conv = nn.Conv2d(512,c2,1,1)
-        # self.flat = nn.Flatten()
-        self.reverse = GradientScalarLayer(-0.1)
+        self.conv = nn.Conv2d(512, c2, 1, 1)
 
     def forward(self, x):
-        # x = ReverseLayerF.apply(x,alpha)
-        # z = torch.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
-        x = self.reverse(x)
         x = self.conv1(x)
         x = self.act(x)
-        # z = self.aap(x)
-        # return self.flat(self.conv(x))  # flatten to x(b,c2)
         return self.conv(x)
 
 
