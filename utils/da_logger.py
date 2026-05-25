@@ -10,7 +10,7 @@ class DALogger:
         self.path = Path(save_dir) / 'da_losses.csv'
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._written_header = self.path.exists()
-        self._fields = ['epoch', 'iter', 'loss_det', 'loss_da_image', 'loss_triplet_img', 'lambda_adv', 'L_c']
+        self._fields = ['epoch', 'iter', 'loss_det', 'loss_da_image', 'loss_triplet_img', 'lambda_adv', 'L_c', 'da_scale']
 
     def log(self, **row):
         for k in self._fields:

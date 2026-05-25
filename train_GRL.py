@@ -64,6 +64,7 @@ from utils.domain_grl import gradient_scalar
 from utils.domain_loss import da_img_loss
 from utils.domain_aux import resolve_da_path, create_target_dataloader
 from utils.advgrl import advgrl_step, default_alpha
+from utils.da_warmup import compute_da_warmup_scale
 from utils.da_logger import DALogger
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
@@ -441,17 +442,22 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 lambda_adv_this_iter = None
                 L_c_this_iter = None
                 loss_da_image_this_iter = None
+                da_scale_this_iter = 1.0
                 if classifier_head is not None:
-                    B_t = t_imgs.size(0)
-                    st_feat = backbone_feat[:B_s + B_t]
-                    alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
-                    loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
-                        st_feat, source_count=B_s, classifier=classifier_head,
-                        use_advgrl=opt.advgrl, lambda_0=opt.da_img_grl_weight,
-                        alpha=alpha, beta=opt.advgrl_threshold,
-                    )
-                    loss_da_image_this_iter = loss_da_image
-                    loss = loss + opt.da_img_weight * loss_da_image
+                    da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
+                    if da_scale_this_iter > 0.0:
+                        B_t = t_imgs.size(0)
+                        st_feat = backbone_feat[:B_s + B_t]
+                        alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
+                        loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
+                            st_feat, source_count=B_s, classifier=classifier_head,
+                            use_advgrl=opt.advgrl, lambda_0=opt.da_img_grl_weight,
+                            alpha=alpha, beta=opt.advgrl_threshold,
+                        )
+                        loss_da_image_this_iter = loss_da_image
+                        loss = loss + da_scale_this_iter * opt.da_img_weight * loss_da_image
+                    # else: da_scale == 0.0 — skip advgrl_step entirely (no forward, no grads).
+                    # loss_da_image_this_iter / lambda_adv_this_iter / L_c_this_iter stay None.
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -473,6 +479,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     loss_da_image=float(loss_da_image_this_iter.item()) if loss_da_image_this_iter is not None else '',
                     lambda_adv=lambda_adv_this_iter if lambda_adv_this_iter is not None else '',
                     L_c=L_c_this_iter if L_c_this_iter is not None else '',
+                    da_scale=da_scale_this_iter if classifier_head is not None else '',
                 )
 
             # Optimize
@@ -649,6 +656,9 @@ def parse_opt(known=False):
     parser.add_argument('--da-img', action='store_true', help='enable image-level DANN (S vs T)')
     parser.add_argument('--da-img-weight', type=float, default=1.0, help='multiplier on loss_da_image')
     parser.add_argument('--da-img-grl-weight', type=float, default=0.1, help='lambda_0 - GRL weight on the DA branch')
+    parser.add_argument('--da-img-warmup', type=str, default='off', choices=['off', 'gate', 'ramp'],
+                        help='DA-loss warmup: off=apply from iter 0 (faithful original), '
+                             'gate=zero during LR warmup, ramp=linear 0→1 over LR warmup')
     # AdvGRL flags (used in PR 3 - defined here so the namespace is stable)
     parser.add_argument('--advgrl', action='store_true', help='enable dynamic lambda_adv (requires --da-img)')
     parser.add_argument('--advgrl-threshold', type=float, default=30.0, help='beta - cap on adv_threshold')
