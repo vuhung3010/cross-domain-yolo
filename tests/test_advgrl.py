@@ -52,3 +52,45 @@ def test_always_le_lambda_0_times_beta():
     for L_c in [0.0, 1e-6, 0.01, 0.1, 0.3, 0.6, 0.6286, 0.7, 1.0, 5.0]:
         v = compute_lambda_adv(L_c, LAMBDA_0, ALPHA, BETA)
         assert v <= LAMBDA_0 * BETA + 1e-6, f'L_c={L_c} gave {v}'
+
+
+import torch
+from models.da_classifier import DAImgHead
+from utils.advgrl import advgrl_step
+
+
+def test_advgrl_step_returns_three_things():
+    head = DAImgHead(in_channels=64)
+    feat = torch.randn(4, 64, 2, 2, requires_grad=True)
+    loss, lambda_adv, L_c = advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=True, lambda_0=0.1, alpha=default_alpha(), beta=30.0,
+    )
+    assert isinstance(loss, torch.Tensor) and loss.dim() == 0
+    assert isinstance(lambda_adv, float)
+    assert isinstance(L_c, float)
+    assert lambda_adv <= 0.1 * 30.0 + 1e-6
+
+
+def test_advgrl_step_gradient_flows_back():
+    """Backprop reaches backbone_feat with the sign-flipped weight."""
+    head = DAImgHead(in_channels=64)
+    feat = torch.randn(4, 64, 2, 2, requires_grad=True)
+    loss, _, _ = advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=False, lambda_0=0.1, alpha=default_alpha(), beta=30.0,
+    )
+    loss.backward()
+    assert feat.grad is not None
+    assert feat.grad.abs().sum() > 0
+
+
+def test_advgrl_step_fixed_lambda_when_off():
+    """use_advgrl=False -> lambda_adv == lambda_0 regardless of L_c."""
+    head = DAImgHead(in_channels=64)
+    feat = torch.randn(4, 64, 2, 2)
+    _, lambda_adv, _ = advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=False, lambda_0=0.07, alpha=default_alpha(), beta=30.0,
+    )
+    assert lambda_adv == 0.07
