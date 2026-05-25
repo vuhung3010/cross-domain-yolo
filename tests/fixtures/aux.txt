@@ -1,0 +1,4 @@
+/home/kacchan/VuHung/project/nhandang_project_2/yolo-G/tests/fixtures/aux/images/aux_00.png
+/home/kacchan/VuHung/project/nhandang_project_2/yolo-G/tests/fixtures/aux/images/aux_01.png
+/home/kacchan/VuHung/project/nhandang_project_2/yolo-G/tests/fixtures/aux/images/aux_02.png
+/home/kacchan/VuHung/project/nhandang_project_2/yolo-G/tests/fixtures/aux/images/aux_03.png
