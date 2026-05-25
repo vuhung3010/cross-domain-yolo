@@ -190,26 +190,27 @@ class Model(nn.Module):
         y = self._clip_augmented(y)  # clip augmented tails
         return torch.cat(y, 1), None  # augmented inference, train
 
-    def _forward_once(self,x, profile=False, visualize=False):
-        y, dt = [], []  # outputs
-        pred = []
+    def _forward_once(self, x, profile=False, visualize=False):
+        """Forward pass that returns (det_pred, backbone_feat).
+
+        backbone_feat is the SPPF output (layer 9) — used externally for domain
+        adaptation in train_GRL.py. Capture is explicit (via m.i == 9) so it
+        does not depend on the save-list being driven by later layer references.
+        """
+        y = []  # save-list outputs
+        backbone_feat = None
         for m in self.model:
             if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
             if profile:
-                self._profile_one_layer(m, x, dt)
-
-            if isinstance(m,Classifyy):
-                x = m(x)  # run
-                pred.append(x)
-            else:
-                x = m(x)
-            y.append(x if m.i in self.save else None)  # save output
-            # if isinstance(m,Classifyy):
-            #     pred.append(x)
+                self._profile_one_layer(m, x, [])
+            x = m(x)
+            if m.i == 9:  # SPPF — explicit capture, independent of save list
+                backbone_feat = x
+            y.append(x if m.i in self.save else None)
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
-        return x,pred
+        return x, backbone_feat
 
     def _forward_feature(self, x, profile=False, visualize=False):
         y, dt = [], []  # outputs
