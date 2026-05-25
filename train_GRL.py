@@ -63,6 +63,8 @@ from models.da_classifier import DAImgHead
 from utils.domain_grl import gradient_scalar
 from utils.domain_loss import da_img_loss
 from utils.domain_aux import resolve_da_path, create_target_dataloader
+from utils.advgrl import advgrl_step, default_alpha
+from utils.da_logger import DALogger
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
@@ -265,7 +267,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # ----------------------------------------------------------------------------
 
     # DA logger writes runs/.../da_losses.csv whenever any DA flag is on.
-    from utils.da_logger import DALogger
     da_logger = DALogger(save_dir=str(save_dir)) if (opt.da_img or opt.triplet_img) else None
 
     # Process 0
@@ -427,18 +428,17 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 det_pred, backbone_feat = model(all_imgs)
                 # Slice predictions to source rows only for the detection loss.
                 det_pred_src = [p[:B_s] for p in det_pred]
-                loss_ori = None
                 if compute_loss_ota is not None:
                     loss, loss_items = compute_loss_ota(det_pred_src, targets.to(device), imgs)
                 else:
-                    loss_ori, loss_items = compute_loss(det_pred_src, targets.to(device))  # loss scaled by batch_size
-                    loss = loss_ori
+                    loss, loss_items = compute_loss(det_pred_src, targets.to(device))  # loss scaled by batch_size
+                # Capture detection-only loss before DA term is added and before DDP/quad scaling.
+                loss_det_unscaled = loss.detach().clone()
 
                 lambda_adv_this_iter = None
                 L_c_this_iter = None
                 loss_da_image_this_iter = None
                 if classifier_head is not None:
-                    from utils.advgrl import advgrl_step, default_alpha
                     B_t = t_imgs.size(0)
                     st_feat = backbone_feat[:B_s + B_t]
                     alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
@@ -449,24 +449,24 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     )
                     loss_da_image_this_iter = loss_da_image
                     loss = loss + opt.da_img_weight * loss_da_image
-                    # Cap invariant — fail fast if compute_lambda_adv is buggy.
-                    assert lambda_adv_this_iter <= opt.da_img_grl_weight * opt.advgrl_threshold + 1e-6
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                 if opt.quad:
                     loss *= 4.
+            # Cap invariant — fail fast if compute_lambda_adv is buggy.
+            if lambda_adv_this_iter is not None:
+                assert lambda_adv_this_iter <= opt.da_img_grl_weight * opt.advgrl_threshold + 1e-6
 
             # Backward
             scaler.scale(loss).backward()
 
             # DA per-iter logging
             if da_logger is not None:
-                _det_loss = loss_ori if loss_ori is not None else loss
                 da_logger.log(
                     epoch=epoch,
                     iter=ni,
-                    loss_det=float(_det_loss.item()),
+                    loss_det=float(loss_det_unscaled.item()),
                     loss_da_image=float(loss_da_image_this_iter.item()) if loss_da_image_this_iter is not None else '',
                     lambda_adv=lambda_adv_this_iter if lambda_adv_this_iter is not None else '',
                     L_c=L_c_this_iter if L_c_this_iter is not None else '',
