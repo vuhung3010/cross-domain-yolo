@@ -55,11 +55,21 @@ class TestRampMode:
         for a, b in zip(scales, scales[1:]):
             assert a <= b
 
+    def test_ramp_clamps_to_zero_for_negative_ni(self):
+        # Contract: return value is always in [0.0, 1.0], even for nonsensical ni < 0.
+        assert compute_da_warmup_scale(ni=-1, nw=1000, mode='ramp') == 0.0
+        assert compute_da_warmup_scale(ni=-100, nw=1000, mode='ramp') == 0.0
+
 
 class TestInvalid:
     def test_unknown_mode_raises(self):
         with pytest.raises(ValueError, match='mode'):
             compute_da_warmup_scale(ni=0, nw=1000, mode='banana')
+
+    def test_unknown_mode_raises_even_when_nw_zero(self):
+        # Mode validation must happen before the nw=0 short-circuit.
+        with pytest.raises(ValueError, match='mode'):
+            compute_da_warmup_scale(ni=0, nw=0, mode='banana')
 
     def test_zero_nw_with_ramp_returns_one(self):
         # Edge case: nw=0 means "no warmup". Ramp should immediately be at 1.0

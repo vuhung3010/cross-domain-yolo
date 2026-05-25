@@ -24,14 +24,15 @@ def compute_da_warmup_scale(ni: int, nw: int, mode: str) -> float:
     Returns:
         Python float in [0.0, 1.0].
     """
+    if mode not in _VALID_MODES:
+        raise ValueError(f'Unknown mode {mode!r}; expected one of {_VALID_MODES}')
     if mode == 'off':
         return 1.0
     if nw <= 0:
         return 1.0
     if mode == 'gate':
         return 0.0 if ni <= nw else 1.0
-    if mode == 'ramp':
-        if ni >= nw:
-            return 1.0
-        return ni / nw
-    raise ValueError(f'Unknown mode {mode!r}; expected one of {_VALID_MODES}')
+    # mode == 'ramp' (only remaining option)
+    if ni >= nw:
+        return 1.0
+    return max(0, ni) / nw
