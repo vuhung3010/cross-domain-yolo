@@ -135,6 +135,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
+        # DA: stash classifier head state for later application (after classifier_head is created)
+        classifier_state_to_load = ckpt.get('classifier')
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
@@ -198,6 +200,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     # Resume
     start_epoch, best_fitness = 0, 0.0
+    classifier_state_to_load = None
     if pretrained:
         # Optimizer
         if ckpt['optimizer'] is not None:
@@ -247,6 +250,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     if opt.da_img:
         # Classifier head matches backbone_feat channels (1024 for YOLOv5-L).
         classifier_head = DAImgHead(in_channels=1024).to(device)
+        # Resume classifier head state from checkpoint, if present.
+        if classifier_state_to_load is not None:
+            classifier_head.load_state_dict(classifier_state_to_load)
+            LOGGER.info(f'{colorstr("DA: ")}restored classifier head from checkpoint')
         # Add classifier params to the optimizer's param groups (no weight decay).
         optimizer.add_param_group({'params': list(classifier_head.parameters()), 'weight_decay': 0.0})
         # Resolve target path (relative paths are joined with data_dict['path']).
@@ -495,7 +502,14 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None,
-                        'date': datetime.now().isoformat()}
+                        'date': datetime.now().isoformat(),
+                        # DA additions (None when DA is off)
+                        'classifier': classifier_head.state_dict() if classifier_head is not None else None,
+                        'advgrl_cfg': {
+                            'lambda_0': opt.da_img_grl_weight,
+                            'alpha': opt.advgrl_alpha,
+                            'beta': opt.advgrl_threshold,
+                        }}
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
