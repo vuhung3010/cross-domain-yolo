@@ -458,6 +458,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                         loss = loss + da_scale_this_iter * opt.da_img_weight * loss_da_image
                     # else: da_scale == 0.0 — skip advgrl_step entirely (no forward, no grads).
                     # loss_da_image_this_iter / lambda_adv_this_iter / L_c_this_iter stay None.
+                    # Note: ramp mode also hits this branch at ni=0 (max(0, 0)/nw = 0.0),
+                    # so L_c is '' for the very first iter under ramp. This is intentional
+                    # and matches the linear schedule (0.0 at ni=0, 1.0 at ni=nw).
 
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
@@ -680,6 +683,8 @@ def main(opt, callbacks=Callbacks()):
     # Flag dependency validation (see spec section 4.2)
     if opt.advgrl and not opt.da_img:
         raise SystemExit('--advgrl requires --da-img (no DA classifier means no L_c to gate on)')
+    if opt.da_img_warmup != 'off' and not opt.da_img:
+        raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
     if opt.triplet_img and not opt.aux:
         raise SystemExit('--triplet-img requires --aux (triplet negative comes from aux loader)')
     if opt.triplet_adaptive and not opt.triplet_img:

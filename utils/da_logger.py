@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 class DALogger:
-    """Append per-iter (epoch, iter, loss_det, loss_da_image, loss_triplet_img, lambda_adv, L_c)."""
+    """Append per-iter (epoch, iter, loss_det, loss_da_image, loss_triplet_img, lambda_adv, L_c, da_scale)."""
 
     def __init__(self, save_dir: str):
         self.path = Path(save_dir) / 'da_losses.csv'
