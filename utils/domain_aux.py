@@ -30,7 +30,7 @@ def create_target_dataloader(images_path, imgsz, batch_size, stride, workers=4, 
     Uses YOLO's create_dataloader so augmentation matches source. The labels it
     yields are ignored at the training loop level — we only consume images.
     """
-    from utils.dataloaders import create_dataloader
+    from utils.datasets import create_dataloader
     loader, _ = create_dataloader(
         images_path, imgsz, batch_size, stride,
         single_cls=False, hyp=None, augment=False, cache=False, rect=False,
