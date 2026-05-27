@@ -61,7 +61,7 @@ from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, is_parallel,
 # DA additions
 from models.da_classifier import DAImgHead
 from utils.domain_grl import gradient_scalar
-from utils.domain_loss import da_img_loss
+from utils.domain_loss import da_img_loss, triplet_img_loss
 from utils.domain_aux import resolve_da_path, create_target_dataloader
 from utils.advgrl import advgrl_step, default_alpha
 from utils.da_warmup import compute_da_warmup_scale
@@ -70,6 +70,11 @@ from utils.da_logger import DALogger
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
+
+
+def _gap_mean(feat_slice):
+    """Global average pool per image, then batch-mean -> [1, C] centroid for a domain slice."""
+    return feat_slice.mean(dim=[2, 3]).mean(dim=0, keepdim=True)
 
 
 def train(hyp,  # path/to/hyp.yaml or hyp dictionary
@@ -454,6 +459,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Forward
             with amp.autocast(enabled=cuda):
                 det_pred, backbone_feat = model(all_imgs)
+                # Batch sizes for each domain slice in backbone_feat.
+                # Order: [source | target | aux]. Defined once here so DA + triplet share them.
+                B_t = t_imgs.size(0) if t_imgs is not None else 0
+                B_a = a_imgs.size(0) if a_imgs is not None else 0
                 # Slice predictions to source rows only for the detection loss.
                 det_pred_src = [p[:B_s] for p in det_pred]
                 if compute_loss_ota is not None:
@@ -471,7 +480,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 if classifier_head is not None:
                     da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
                     if da_scale_this_iter > 0.0:
-                        B_t = t_imgs.size(0)
                         st_feat = backbone_feat[:B_s + B_t]
                         alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
                         loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
@@ -488,16 +496,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     # and matches the linear schedule (0.0 at ni=0, 1.0 at ni=nw).
 
                 if opt.triplet_img:
-                    from utils.domain_loss import triplet_img_loss
-                    # GAP per image, then batch-mean -> [1, C] centroid per domain.
-                    def gap_mean(feat_slice):
-                        return feat_slice.mean(dim=[2, 3]).mean(dim=0, keepdim=True)
-
-                    B_t_local = t_imgs.size(0)
-                    B_a_local = a_imgs.size(0)
-                    F_S = gap_mean(backbone_feat[:B_s])
-                    F_T = gap_mean(backbone_feat[B_s:B_s + B_t_local])
-                    F_A = gap_mean(backbone_feat[B_s + B_t_local:B_s + B_t_local + B_a_local])
+                    F_S = _gap_mean(backbone_feat[:B_s])
+                    F_T = _gap_mean(backbone_feat[B_s:B_s + B_t])
+                    F_A = _gap_mean(backbone_feat[B_s + B_t:B_s + B_t + B_a])
 
                     # Margin (with optional adaptive ramp).
                     margin = opt.triplet_margin
@@ -741,6 +742,8 @@ def main(opt, callbacks=Callbacks()):
         raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
     if opt.triplet_img and not opt.aux:
         raise SystemExit('--triplet-img requires --aux (triplet negative comes from aux loader)')
+    if opt.triplet_img and not opt.da_img:
+        raise SystemExit('--triplet-img requires --da-img (target features come from the DA target loader)')
     if opt.triplet_adaptive and not opt.triplet_img:
         raise SystemExit('--triplet-adaptive requires --triplet-img')
 
