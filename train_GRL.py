@@ -270,6 +270,15 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         )
     # ----------------------------------------------------------------------------
 
+    aux_loader = None
+    if opt.aux:
+        if 'aux' not in data_dict:
+            raise SystemExit('--aux set but no `aux:` key in data YAML')
+        aux_path = resolve_da_path(data_dict['aux'], data_dict.get('path'))
+        aux_loader = create_target_dataloader(
+            aux_path, imgsz, batch_size // WORLD_SIZE, gs, workers=workers, prefix=colorstr('aux: '),
+        )
+
     # DA logger writes runs/.../da_losses.csv whenever any DA flag is on.
     da_logger = DALogger(save_dir=str(save_dir)) if (opt.da_img or opt.triplet_img) else None
 
@@ -379,6 +388,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 target_loader.sampler.set_epoch(epoch)
         pbar = enumerate(train_loader)
         target_iter = iter(target_loader) if target_loader is not None else None
+        aux_iter = iter(aux_loader) if aux_loader is not None else None
 
         # LOGGER.info(('\n' + '%10s' * 7) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'labels', 'img_size'))
 
@@ -406,6 +416,16 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             else:
                 all_imgs = imgs
             # ---------------------------------------------------------------------
+
+            a_imgs = None
+            if aux_iter is not None:
+                try:
+                    a_batch = next(aux_iter)
+                except StopIteration:
+                    aux_iter = iter(aux_loader)
+                    a_batch = next(aux_iter)
+                a_imgs = a_batch[0].to(device, non_blocking=True).float() / 255.0
+                all_imgs = torch.cat([all_imgs, a_imgs], dim=0)
 
             # Warmup
             if ni <= nw:
