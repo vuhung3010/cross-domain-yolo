@@ -1,38 +1,20 @@
-# ——*——code:UTF-8——*——
-# Author : airy
-# DATA : 2023/1/16 上午9:41
+"""Deprecation shim — use utils.domain_loss instead.
+
+Kept to avoid breaking old imports. The original DA_loss is re-exported with
+its legacy signature; new code should call utils.domain_loss.da_img_loss.
+"""
 import torch
 import torch.nn.functional as F
 
 
-def DA_loss(features,target):
-    loss = 0
-    # feature_flatten = []
-    # label_flatten = []
+def DA_loss(features, target):
+    """Legacy DA loss: features is a list of [B,C,H,W] tensors, target is 0 or 1."""
+    loss = 0.0
     for feature in features:
-        # print(feature.shape)
-        N,C,H,W = feature.shape
-        # print(feature.shape)
-        feature = feature.permute(0,2,3,1)
+        N, C, H, W = feature.shape
+        feature = feature.permute(0, 2, 3, 1)
         label = torch.zeros_like(feature) if target == 0 else torch.ones_like(feature)
-            # print(label,label.shape)
-            # print('label shape is ',label.shape)
-            # feature_flatten.append(feature.reshape(N,-1))
-            # label_flatten.append(label.reshape(N,-1))
-            #
-            # feature_end = torch.cat(feature_flatten)
-            # label_end = torch.cat(label_flatten).to(feature_end.device)
-        feature_end = feature.reshape(N,-1)
-        label_end = label.reshape(N,-1)
-        _loss = F.binary_cross_entropy_with_logits(feature_end,label_end)
-        loss += _loss
-            # print(loss)
-
-    return loss/len(features)
-
-
-
-# input = [torch.randn(10,3,32,32).cuda()]
-# result = DA_loss(input,0)
-# print(result)
-
+        feature_end = feature.reshape(N, -1)
+        label_end = label.reshape(N, -1)
+        loss = loss + F.binary_cross_entropy_with_logits(feature_end, label_end)
+    return loss / len(features)
