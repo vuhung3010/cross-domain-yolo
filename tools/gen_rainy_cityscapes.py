@@ -33,8 +33,19 @@ from tqdm import tqdm
 from tools import augment_and_mix
 
 
+_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.bmp')
+
+
+def _image_files(directory: str):
+    """Return sorted list of image filenames in *directory* (case-insensitive ext filter)."""
+    return sorted(
+        f for f in os.listdir(directory)
+        if f.lower().endswith(_IMAGE_EXTS)
+    )
+
+
 def random_rain_mask(rain_path: str) -> np.ndarray:
-    files = sorted(os.listdir(rain_path))
+    files = _image_files(rain_path)
     idx = random.randint(0, len(files) - 1)
     return cv2.imread(os.path.join(rain_path, files[idx]))
 
@@ -66,6 +77,11 @@ def main():
 
     random.seed(args.seed)
     np.random.seed(args.seed)
+
+    if not os.path.isdir(args.rain_masks):
+        sys.exit(f'ERROR: --rain-masks path does not exist or is not a directory: {args.rain_masks}')
+    if not _image_files(args.rain_masks):
+        sys.exit(f'ERROR: --rain-masks dir contains no image files (*.png/jpg/jpeg/bmp): {args.rain_masks}')
 
     src_paths = sorted(glob(os.path.join(args.source_images, '*')))
     Path(args.output).mkdir(parents=True, exist_ok=True)
