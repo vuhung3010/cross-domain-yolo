@@ -5,3 +5,16 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# Pretrained YOLOv5 weights (re-download from ultralytics releases)
+yolov5l.pt
+yolov5s.pt
+yolov5m.pt
+yolov5n.pt
+yolov5x.pt
+
+# Training outputs (per-run artifacts; not for version control)
+runs/
+
+# Test fixture caches
+tests/fixtures/**/labels.cache

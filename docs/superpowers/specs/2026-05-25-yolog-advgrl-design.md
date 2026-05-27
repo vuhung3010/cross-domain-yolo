@@ -400,14 +400,14 @@ Sequential. Each run writes to `runs/train_GRL/<name>/`. No result aggregation �
 
 ### 5.3 Notebooks (`notebooks/`)
 
-| # | filename | purpose |
-|---|---|---|
-| 1 | `00_setup_and_data.ipynb` | clone repo, mount Drive, download Cityscapes + Foggy Cityscapes |
-| 2 | `01_generate_rainy_aux.ipynb` | run RainMix offline generator (~30 min × 3 splits, one-time) |
-| 3 | `02_train_baseline.ipynb` | source-only YOLOv5-L (no DA flags) |
-| 4 | `03_train_yolog_original.ipynb` | `--da-img` only (reproduces Paper 1) |
-| 5 | `04_train_advgrl_full.ipynb` | `--da-img --advgrl --aux --triplet-img` |
-| 6 | `05_evaluate_and_compare.ipynb` | load all checkpoints, run `val_GRL.py`, comparison table |
+| #   | filename                        | purpose                                                         |
+| --- | ------------------------------- | --------------------------------------------------------------- |
+| 1   | `00_setup_and_data.ipynb`       | clone repo, mount Drive, download Cityscapes + Foggy Cityscapes |
+| 2   | `01_generate_rainy_aux.ipynb`   | run RainMix offline generator (~30 min × 3 splits, one-time)    |
+| 3   | `02_train_baseline.ipynb`       | source-only YOLOv5-L (no DA flags)                              |
+| 4   | `03_train_yolog_original.ipynb` | `--da-img` only (reproduces Paper 1)                            |
+| 5   | `04_train_advgrl_full.ipynb`    | `--da-img --advgrl --aux --triplet-img`                         |
+| 6   | `05_evaluate_and_compare.ipynb` | load all checkpoints, run `val_GRL.py`, comparison table        |
 
 Conventions: first cell sets `BASE_DIR` (default `/content/drive/MyDrive/yolog-advgrl/`). Training cells call `!python train_GRL.py` rather than re-implementing the loop. Each training notebook ends with a `val_GRL.py` call.
 
