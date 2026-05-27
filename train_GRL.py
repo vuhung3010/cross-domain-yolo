@@ -279,6 +279,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             aux_path, imgsz, batch_size // WORLD_SIZE, gs, workers=workers, prefix=colorstr('aux: '),
         )
 
+    # Triplet adaptive-margin state (read & updated only when opt.triplet_adaptive).
+    # last_loss=1.0 -> no ramp on first iter (we only bump when previous loss hit 0).
+    _adaptive_margin_state = {'margin': opt.triplet_margin, 'last_loss': 1.0}
+
     # DA logger writes runs/.../da_losses.csv whenever any DA flag is on.
     da_logger = DALogger(save_dir=str(save_dir)) if (opt.da_img or opt.triplet_img) else None
 
@@ -462,6 +466,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 lambda_adv_this_iter = None
                 L_c_this_iter = None
                 loss_da_image_this_iter = None
+                loss_triplet_img_this_iter = None
                 da_scale_this_iter = 1.0
                 if classifier_head is not None:
                     da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
@@ -482,6 +487,34 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     # so L_c is '' for the very first iter under ramp. This is intentional
                     # and matches the linear schedule (0.0 at ni=0, 1.0 at ni=nw).
 
+                if opt.triplet_img:
+                    from utils.domain_loss import triplet_img_loss
+                    # GAP per image, then batch-mean -> [1, C] centroid per domain.
+                    def gap_mean(feat_slice):
+                        return feat_slice.mean(dim=[2, 3]).mean(dim=0, keepdim=True)
+
+                    B_t_local = t_imgs.size(0)
+                    B_a_local = a_imgs.size(0)
+                    F_S = gap_mean(backbone_feat[:B_s])
+                    F_T = gap_mean(backbone_feat[B_s:B_s + B_t_local])
+                    F_A = gap_mean(backbone_feat[B_s + B_t_local:B_s + B_t_local + B_a_local])
+
+                    # Margin (with optional adaptive ramp).
+                    margin = opt.triplet_margin
+                    if opt.triplet_adaptive:
+                        margin = _adaptive_margin_state.get('margin', opt.triplet_margin)
+                    loss_triplet = triplet_img_loss(F_S, F_T, F_A, margin=margin)
+                    loss_triplet_img_this_iter = loss_triplet
+                    loss = loss + opt.triplet_img_weight * loss_triplet
+
+                    # Bump margin if loss hit zero last iter (matches DA-Detect's adaptive logic).
+                    if opt.triplet_adaptive:
+                        prev = _adaptive_margin_state['last_loss']
+                        cur_margin = _adaptive_margin_state['margin']
+                        if prev == 0.0 and cur_margin < opt.triplet_max_margin:
+                            _adaptive_margin_state['margin'] = cur_margin + 0.001
+                        _adaptive_margin_state['last_loss'] = float(loss_triplet.item())
+
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                 if opt.quad:
@@ -500,6 +533,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     iter=ni,
                     loss_det=float(loss_det_unscaled.item()),
                     loss_da_image=float(loss_da_image_this_iter.item()) if loss_da_image_this_iter is not None else '',
+                    loss_triplet_img=float(loss_triplet_img_this_iter.item()) if loss_triplet_img_this_iter is not None else '',
                     lambda_adv=lambda_adv_this_iter if lambda_adv_this_iter is not None else '',
                     L_c=L_c_this_iter if L_c_this_iter is not None else '',
                     da_scale=da_scale_this_iter if classifier_head is not None else '',
