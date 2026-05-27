@@ -3,22 +3,27 @@ all six valid flag combinations.
 
 Slow-ish (a couple of minutes total). Skipped automatically if CUDA is not available.
 """
-import os
 import subprocess
 import sys
 from pathlib import Path
+
 import pytest
+import torch
 
 
 ROOT = Path(__file__).parent.parent
-FIXTURES = ROOT / 'tests' / 'fixtures'
+FIXTURES = Path(__file__).parent / 'fixtures'
 
 
 @pytest.fixture(scope='module', autouse=True)
 def ensure_fixtures():
-    """Regenerate fixtures if missing."""
-    if not (FIXTURES / 'source.txt').exists():
-        subprocess.run([sys.executable, str(FIXTURES / 'make_fixtures.py')], check=True)
+    """Always regenerate fixtures (overwrite-safe, <1s) so partial deletions self-heal."""
+    sys.path.insert(0, str(FIXTURES))
+    try:
+        import make_fixtures  # type: ignore
+        make_fixtures.main()
+    finally:
+        sys.path.pop(0)
 
 
 @pytest.fixture(scope='module')
@@ -35,7 +40,7 @@ names: ['toy']
     return str(p)
 
 
-@pytest.mark.skipif(not __import__('torch').cuda.is_available(), reason='needs CUDA')
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA')
 @pytest.mark.parametrize('flags,name', [
     ([],                                                                           'baseline'),
     (['--da-img'],                                                                 'daimg'),
@@ -53,5 +58,20 @@ def test_train_GRL_smoke(toy_yaml, tmp_path, flags, name):
         '--name', f'smoke_{name}',
         '--project', str(tmp_path),
     ] + flags
-    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
+    result = subprocess.run(
+        cmd, cwd=ROOT, capture_output=True, text=True, timeout=180,
+        stdin=subprocess.DEVNULL,
+    )
     assert result.returncode == 0, f'FAILED [{name}]:\nSTDOUT:\n{result.stdout[-2000:]}\nSTDERR:\n{result.stderr[-2000:]}'
+
+    # Positive artifact checks — guard against vacuous-pass on a no-op exit.
+    run_dir = tmp_path / f'smoke_{name}'
+    ckpt = run_dir / 'weights' / 'last.pt'
+    assert ckpt.exists(), f'[{name}] checkpoint missing: {ckpt}'
+
+    if '--da-img' in flags:
+        da_csv = run_dir / 'da_losses.csv'
+        assert da_csv.exists(), f'[{name}] da_losses.csv missing: {da_csv}'
+        # Header + at least one data row.
+        lines = da_csv.read_text().splitlines()
+        assert len(lines) > 1, f'[{name}] da_losses.csv has no data rows (got {len(lines)} lines)'
