@@ -61,9 +61,9 @@ from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, is_parallel,
 # DA additions
 from models.da_classifier import DAImgHead
 from utils.domain_grl import gradient_scalar
-from utils.domain_loss import da_img_loss, triplet_img_loss
+from utils.domain_loss import da_img_faithful_loss_pair, da_img_loss, triplet_img_loss
 from utils.domain_aux import resolve_da_path, create_target_dataloader
-from utils.advgrl import advgrl_step, default_alpha
+from utils.advgrl import advgrl_step, compute_lambda_adv, default_alpha
 from utils.da_warmup import compute_da_warmup_scale
 from utils.da_logger import DALogger
 
@@ -458,13 +458,23 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
             # Forward
             with amp.autocast(enabled=cuda):
-                det_pred, backbone_feat = model(all_imgs)
-                # Batch sizes for each domain slice in backbone_feat.
-                # Order: [source | target | aux]. Defined once here so DA + triplet share them.
-                B_t = t_imgs.size(0) if t_imgs is not None else 0
-                B_a = a_imgs.size(0) if a_imgs is not None else 0
-                # Slice predictions to source rows only for the detection loss.
-                det_pred_src = [p[:B_s] for p in det_pred]
+                if opt.da_img_faithful:
+                    det_pred, backbone_feat = model(imgs)
+                    _, target_backbone_feat = model(t_imgs)
+                    aux_backbone_feat = None
+                    B_t = t_imgs.size(0)
+                    B_a = a_imgs.size(0) if a_imgs is not None else 0
+                    if a_imgs is not None:
+                        _, aux_backbone_feat = model(a_imgs)
+                    det_pred_src = det_pred
+                else:
+                    det_pred, backbone_feat = model(all_imgs)
+                    # Batch sizes for each domain slice in backbone_feat.
+                    # Order: [source | target | aux]. Defined once here so DA + triplet share them.
+                    B_t = t_imgs.size(0) if t_imgs is not None else 0
+                    B_a = a_imgs.size(0) if a_imgs is not None else 0
+                    # Slice predictions to source rows only for the detection loss.
+                    det_pred_src = [p[:B_s] for p in det_pred]
                 if compute_loss_ota is not None:
                     loss, loss_items = compute_loss_ota(det_pred_src, targets.to(device), imgs)
                 else:
@@ -479,7 +489,29 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 da_scale_this_iter = 1.0
                 if classifier_head is not None:
                     da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
-                    if da_scale_this_iter > 0.0:
+                    if opt.da_img_faithful:
+                        source_logits_detached = classifier_head(backbone_feat.detach())
+                        target_logits_detached = classifier_head(target_backbone_feat.detach())
+                        L_c_tensor = da_img_faithful_loss_pair(source_logits_detached, target_logits_detached)
+                        L_c_this_iter = float(L_c_tensor.item())
+                        if opt.advgrl:
+                            alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
+                            lambda_adv_this_iter = compute_lambda_adv(
+                                L_c_this_iter,
+                                lambda_0=opt.da_img_grl_weight,
+                                alpha=alpha,
+                                beta=opt.advgrl_threshold,
+                            )
+                        else:
+                            lambda_adv_this_iter = opt.da_img_grl_weight
+                        source_feat_grl = gradient_scalar(backbone_feat, -lambda_adv_this_iter)
+                        target_feat_grl = gradient_scalar(target_backbone_feat, -lambda_adv_this_iter)
+                        source_logits = classifier_head(source_feat_grl)
+                        target_logits = classifier_head(target_feat_grl)
+                        loss_da_image = da_img_faithful_loss_pair(source_logits, target_logits)
+                        loss_da_image_this_iter = loss_da_image
+                        loss = loss + opt.da_img_weight * loss_da_image
+                    elif da_scale_this_iter > 0.0:
                         st_feat = backbone_feat[:B_s + B_t]
                         alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
                         loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
@@ -496,9 +528,14 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     # and matches the linear schedule (0.0 at ni=0, 1.0 at ni=nw).
 
                 if opt.triplet_img:
-                    F_S = _gap_mean(backbone_feat[:B_s])
-                    F_T = _gap_mean(backbone_feat[B_s:B_s + B_t])
-                    F_A = _gap_mean(backbone_feat[B_s + B_t:B_s + B_t + B_a])
+                    if opt.da_img_faithful:
+                        F_S = _gap_mean(backbone_feat)
+                        F_T = _gap_mean(target_backbone_feat)
+                        F_A = _gap_mean(aux_backbone_feat)
+                    else:
+                        F_S = _gap_mean(backbone_feat[:B_s])
+                        F_T = _gap_mean(backbone_feat[B_s:B_s + B_t])
+                        F_A = _gap_mean(backbone_feat[B_s + B_t:B_s + B_t + B_a])
 
                     # Margin (with optional adaptive ramp).
                     margin = opt.triplet_margin
@@ -712,6 +749,8 @@ def parse_opt(known=False):
 
     # Domain adaptation flags (all default off; --da-img reproduces YOLO-G original)
     parser.add_argument('--da-img', action='store_true', help='enable image-level DANN (S vs T)')
+    parser.add_argument('--da-img-faithful', action='store_true',
+                        help='use original YOLO-G image-level DA: separate source/target forwards, source=0, target=1')
     parser.add_argument('--da-img-weight', type=float, default=1.0, help='multiplier on loss_da_image')
     parser.add_argument('--da-img-grl-weight', type=float, default=0.1, help='lambda_0 - GRL weight on the DA branch')
     parser.add_argument('--da-img-warmup', type=str, default='off', choices=['off', 'gate', 'ramp'],
@@ -738,6 +777,10 @@ def main(opt, callbacks=Callbacks()):
     # Flag dependency validation (see spec section 4.2)
     if opt.advgrl and not opt.da_img:
         raise SystemExit('--advgrl requires --da-img (no DA classifier means no L_c to gate on)')
+    if opt.da_img_faithful and not opt.da_img:
+        raise SystemExit('--da-img-faithful requires --da-img')
+    if opt.da_img_faithful and opt.da_img_warmup != 'off':
+        raise SystemExit('--da-img-faithful requires --da-img-warmup off')
     if opt.da_img_warmup != 'off' and not opt.da_img:
         raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
     if opt.triplet_img and not opt.aux:

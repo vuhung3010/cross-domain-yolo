@@ -28,6 +28,15 @@ def da_img_loss(logits: torch.Tensor, source_count: int) -> torch.Tensor:
     return F.binary_cross_entropy_with_logits(logits, labels)
 
 
+def da_img_faithful_loss_pair(source_logits: torch.Tensor, target_logits: torch.Tensor) -> torch.Tensor:
+    """Original YOLO-G image-level DA loss: source=0, target=1, 0.5/0.5."""
+    source_feature = source_logits.permute(0, 2, 3, 1).reshape(source_logits.shape[0], -1)
+    target_feature = target_logits.permute(0, 2, 3, 1).reshape(target_logits.shape[0], -1)
+    source_loss = F.binary_cross_entropy_with_logits(source_feature, torch.zeros_like(source_feature))
+    target_loss = F.binary_cross_entropy_with_logits(target_feature, torch.ones_like(target_feature))
+    return 0.5 * source_loss + 0.5 * target_loss
+
+
 def triplet_img_loss(anchor: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: float = 1.0) -> torch.Tensor:
     """Image-level triplet loss: max(d(A,P) - d(A,N) + margin, 0).
 

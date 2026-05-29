@@ -18,8 +18,11 @@ BASE_ARGS="--weights $WEIGHTS --cfg $CFG --data $DATA --epochs $EPOCHS --batch-s
 # 1. Baseline (source-only)
 python train_GRL.py $BASE_ARGS --name ablation_01_baseline
 
-# 2. --da-img only (original YOLO-G)
+# 2. --da-img only (current PR2+ dumb-model implementation)
 python train_GRL.py $BASE_ARGS --name ablation_02_daimg --da-img
+
+# 7. Faithful original YOLO-G image-level DA baseline
+python train_GRL.py $BASE_ARGS --name ablation_07_daimg_faithful --da-img --da-img-faithful
 
 # 3. --da-img --advgrl
 python train_GRL.py $BASE_ARGS --name ablation_03_advgrl --da-img --advgrl

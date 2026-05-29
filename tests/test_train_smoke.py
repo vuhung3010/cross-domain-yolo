@@ -44,6 +44,11 @@ names: ['toy']
 @pytest.mark.parametrize('flags,name', [
     ([],                                                                           'baseline'),
     (['--da-img'],                                                                 'daimg'),
+    (['--da-img', '--da-img-faithful'],                                             'daimg_faithful'),
+    (['--da-img', '--da-img-faithful', '--advgrl'],                                'daimg_faithful_advgrl'),
+    (['--da-img', '--da-img-faithful', '--aux'],                                    'daimg_faithful_aux'),
+    (['--da-img', '--da-img-faithful', '--aux', '--triplet-img'],                   'daimg_faithful_triplet'),
+    (['--da-img', '--da-img-faithful', '--advgrl', '--aux', '--triplet-img'],       'daimg_faithful_full'),
     (['--da-img', '--advgrl'],                                                     'advgrl'),
     (['--da-img', '--aux'],                                                        'aux'),
     (['--da-img', '--aux', '--triplet-img'],                                       'triplet'),
@@ -75,3 +80,19 @@ def test_train_GRL_smoke(toy_yaml, tmp_path, flags, name):
         # Header + at least one data row.
         lines = da_csv.read_text().splitlines()
         assert len(lines) > 1, f'[{name}] da_losses.csv has no data rows (got {len(lines)} lines)'
+        if '--da-img-faithful' in flags:
+            header = lines[0].split(',')
+            first_row = lines[1].split(',')
+            row = dict(zip(header, first_row))
+            assert row['da_scale'] == '1.0'
+            if '--advgrl' in flags:
+                assert row['L_c'] != ''
+                assert 0.0 < float(row['lambda_adv']) <= 3.0
+            else:
+                assert row['lambda_adv'] == '0.1'
+        if '--triplet-img' in flags:
+            header = lines[0].split(',')
+            first_row = lines[1].split(',')
+            row = dict(zip(header, first_row))
+            assert row['loss_triplet_img'] != ''
+            assert float(row['loss_triplet_img']) >= 0.0
