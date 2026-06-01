@@ -2,7 +2,7 @@
 import math
 import torch
 import torch.nn.functional as F
-from utils.domain_loss import da_img_faithful_loss_pair, da_img_loss, triplet_img_loss
+from utils.domain_loss import da_img_faithful_loss_multi, da_img_faithful_loss_pair, da_img_loss, triplet_img_loss
 
 
 def test_da_img_loss_shape_and_value():
@@ -47,6 +47,39 @@ def test_da_img_faithful_loss_pair_matches_original_yolog_flattening():
     expected_source = F.binary_cross_entropy_with_logits(source_feature, torch.zeros_like(source_feature))
     expected_target = F.binary_cross_entropy_with_logits(target_feature, torch.ones_like(target_feature))
     expected = 0.5 * expected_source + 0.5 * expected_target
+    assert torch.allclose(loss, expected)
+
+
+def test_da_img_faithful_loss_multi_single_scale_matches_pair():
+    source_logits = {'sppf': torch.randn(2, 1, 3, 4)}
+    target_logits = {'sppf': torch.randn(2, 1, 3, 4)}
+
+    loss = da_img_faithful_loss_multi(source_logits, target_logits)
+    expected = da_img_faithful_loss_pair(source_logits['sppf'], target_logits['sppf'])
+
+    assert loss.shape == ()
+    assert torch.allclose(loss, expected)
+
+
+def test_da_img_faithful_loss_multi_averages_scales():
+    source_logits = {
+        'neck_p3': torch.randn(2, 1, 8, 8),
+        'neck_p4': torch.randn(2, 1, 4, 4),
+        'neck_p5': torch.randn(2, 1, 2, 2),
+    }
+    target_logits = {
+        'neck_p3': torch.randn(2, 1, 8, 8),
+        'neck_p4': torch.randn(2, 1, 4, 4),
+        'neck_p5': torch.randn(2, 1, 2, 2),
+    }
+
+    loss = da_img_faithful_loss_multi(source_logits, target_logits)
+    expected = torch.stack([
+        da_img_faithful_loss_pair(source_logits[name], target_logits[name])
+        for name in source_logits
+    ]).mean()
+
+    assert loss.shape == ()
     assert torch.allclose(loss, expected)
 
 

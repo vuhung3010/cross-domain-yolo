@@ -191,26 +191,31 @@ class Model(nn.Module):
         return torch.cat(y, 1), None  # augmented inference, train
 
     def _forward_once(self, x, profile=False, visualize=False):
-        """Forward pass that returns (det_pred, backbone_feat).
+        """Forward pass that returns (det_pred, features).
 
-        backbone_feat is the SPPF output (layer 9) — used externally for domain
-        adaptation in train_GRL.py. Capture is explicit (via m.i == 9) so it
-        does not depend on the save-list being driven by later layer references.
+        features are plain tensors captured for train_GRL.py DA logic. The model
+        stays dumb: it does not run GRL, domain heads, or DA losses.
         """
         y = []  # save-list outputs
-        backbone_feat = None
+        features = {}
+        feature_layers = {
+            9: 'sppf',
+            17: 'neck_p3',
+            20: 'neck_p4',
+            23: 'neck_p5',
+        }
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
             if profile:
                 self._profile_one_layer(m, x, [])
             x = m(x)
-            if m.i == 9:  # SPPF — explicit capture, independent of save list
-                backbone_feat = x
+            if m.i in feature_layers:
+                features[feature_layers[m.i]] = x
             y.append(x if m.i in self.save else None)
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
-        return x, backbone_feat
+        return x, features
 
     def _forward_feature(self, x, profile=False, visualize=False):
         y, dt = [], []  # outputs

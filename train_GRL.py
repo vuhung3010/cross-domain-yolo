@@ -40,7 +40,7 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 import val_GRL as val  # for end-of-epoch mAP — patched for dumb-model tuple shape
 from models.experimental import attempt_load
-from models.yolo_GRL import Model  # GRL-aware model: forward returns (det_pred, backbone_feat)
+from models.yolo_GRL import Model  # GRL-aware model: forward returns (det_pred, features)
 from utils.autoanchor import check_anchors
 from utils.autobatch import check_train_batch_size
 from utils.callbacks import Callbacks
@@ -61,7 +61,7 @@ from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, is_parallel,
 # DA additions
 from models.da_classifier import DAImgHead
 from utils.domain_grl import gradient_scalar
-from utils.domain_loss import da_img_faithful_loss_pair, da_img_loss, triplet_img_loss
+from utils.domain_loss import da_img_faithful_loss_multi, da_img_faithful_loss_pair, da_img_loss, triplet_img_loss
 from utils.domain_aux import resolve_da_path, create_target_dataloader
 from utils.advgrl import advgrl_step, compute_lambda_adv, default_alpha
 from utils.da_warmup import compute_da_warmup_scale
@@ -70,6 +70,29 @@ from utils.da_logger import DALogger
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
+
+
+DA_FEATURE_CHANNELS = {
+    'sppf': {'sppf': 1024},
+    'neck-p3': {'neck_p3': 256},
+    'neck-p4': {'neck_p4': 512},
+    'neck-p5': {'neck_p5': 1024},
+    'neck-all': {'neck_p3': 256, 'neck_p4': 512, 'neck_p5': 1024},
+}
+
+
+def _selected_da_features(name):
+    """Return ordered feature-name -> channels mapping for --da-feat-layers."""
+    return DA_FEATURE_CHANNELS[name]
+
+
+def _feature(features, name):
+    """Read a named DA feature from new dict output, with sppf fallback for old tensor output."""
+    if isinstance(features, dict):
+        return features[name]
+    if name == 'sppf':
+        return features
+    raise ValueError(f'model did not return feature dict needed for {name}')
 
 
 def _gap_mean(feat_slice):
@@ -133,6 +156,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # Model
     check_suffix(weights, '.pt')  # check weights
     pretrained = weights.endswith('.pt')
+    classifier_state_to_load = None
     if pretrained:
         with torch_distributed_zero_first(LOCAL_RANK):
             weights = attempt_download(weights)  # download if not found locally
@@ -143,7 +167,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
-        # DA: stash classifier head state for later application (after classifier_head is created)
+        # DA: stash classifier head state for later application (after classifier_heads is created)
         classifier_state_to_load = ckpt.get('classifier')
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
@@ -208,7 +232,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     # Resume
     start_epoch, best_fitness = 0, 0.0
-    classifier_state_to_load = None
     if pretrained:
         # Optimizer
         if ckpt['optimizer'] is not None:
@@ -253,17 +276,29 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # ---- Domain adaptation setup ------------------------------------------------
-    classifier_head = None
+    classifier_heads = None
+    da_feature_channels = None
     target_loader = None
     if opt.da_img:
-        # Classifier head matches backbone_feat channels (1024 for YOLOv5-L).
-        classifier_head = DAImgHead(in_channels=1024).to(device)
+        da_feature_channels = _selected_da_features(opt.da_feat_layers)
+        classifier_heads = nn.ModuleDict({
+            name: DAImgHead(in_channels=channels)
+            for name, channels in da_feature_channels.items()
+        }).to(device)
         # Resume classifier head state from checkpoint, if present.
         if classifier_state_to_load is not None:
-            classifier_head.load_state_dict(classifier_state_to_load)
-            LOGGER.info(f'{colorstr("DA: ")}restored classifier head from checkpoint')
+            try:
+                classifier_heads.load_state_dict(classifier_state_to_load)
+                LOGGER.info(f'{colorstr("DA: ")}restored DA classifier heads from checkpoint')
+            except RuntimeError:
+                if list(da_feature_channels.keys()) == ['sppf']:
+                    classifier_heads['sppf'].load_state_dict(classifier_state_to_load)
+                    LOGGER.info(f'{colorstr("DA: ")}restored legacy DA classifier head from checkpoint')
+                else:
+                    LOGGER.warning(f'{colorstr("DA: ")}checkpoint classifier state does not match {opt.da_feat_layers}; '
+                                   'starting DA heads from random init')
         # Add classifier params to the optimizer's param groups (no weight decay).
-        optimizer.add_param_group({'params': list(classifier_head.parameters()), 'weight_decay': 0.0,
+        optimizer.add_param_group({'params': list(classifier_heads.parameters()), 'weight_decay': 0.0,
                                    'initial_lr': hyp['lr0']})
         # Keep scheduler in sync — LambdaLR.step() zips lr_lambdas/base_lrs with param_groups.
         scheduler.lr_lambdas.append(lf)
@@ -459,16 +494,20 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Forward
             with amp.autocast(enabled=cuda):
                 if opt.da_img_faithful:
-                    det_pred, backbone_feat = model(imgs)
-                    _, target_backbone_feat = model(t_imgs)
-                    aux_backbone_feat = None
+                    det_pred, backbone_features = model(imgs)
+                    _, target_backbone_features = model(t_imgs)
+                    aux_backbone_features = None
                     B_t = t_imgs.size(0)
                     B_a = a_imgs.size(0) if a_imgs is not None else 0
                     if a_imgs is not None:
-                        _, aux_backbone_feat = model(a_imgs)
+                        _, aux_backbone_features = model(a_imgs)
+                    backbone_feat = _feature(backbone_features, 'sppf')
+                    target_backbone_feat = _feature(target_backbone_features, 'sppf')
+                    aux_backbone_feat = _feature(aux_backbone_features, 'sppf') if aux_backbone_features is not None else None
                     det_pred_src = det_pred
                 else:
-                    det_pred, backbone_feat = model(all_imgs)
+                    det_pred, backbone_features = model(all_imgs)
+                    backbone_feat = _feature(backbone_features, 'sppf')
                     # Batch sizes for each domain slice in backbone_feat.
                     # Order: [source | target | aux]. Defined once here so DA + triplet share them.
                     B_t = t_imgs.size(0) if t_imgs is not None else 0
@@ -487,12 +526,18 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 loss_da_image_this_iter = None
                 loss_triplet_img_this_iter = None
                 da_scale_this_iter = 1.0
-                if classifier_head is not None:
+                if classifier_heads is not None:
                     da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
                     if opt.da_img_faithful:
-                        source_logits_detached = classifier_head(backbone_feat.detach())
-                        target_logits_detached = classifier_head(target_backbone_feat.detach())
-                        L_c_tensor = da_img_faithful_loss_pair(source_logits_detached, target_logits_detached)
+                        source_logits_detached = {
+                            name: classifier_heads[name](_feature(backbone_features, name).detach())
+                            for name in da_feature_channels
+                        }
+                        target_logits_detached = {
+                            name: classifier_heads[name](_feature(target_backbone_features, name).detach())
+                            for name in da_feature_channels
+                        }
+                        L_c_tensor = da_img_faithful_loss_multi(source_logits_detached, target_logits_detached)
                         L_c_this_iter = float(L_c_tensor.item())
                         if opt.advgrl:
                             alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
@@ -504,18 +549,26 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                             )
                         else:
                             lambda_adv_this_iter = opt.da_img_grl_weight
-                        source_feat_grl = gradient_scalar(backbone_feat, -lambda_adv_this_iter)
-                        target_feat_grl = gradient_scalar(target_backbone_feat, -lambda_adv_this_iter)
-                        source_logits = classifier_head(source_feat_grl)
-                        target_logits = classifier_head(target_feat_grl)
-                        loss_da_image = da_img_faithful_loss_pair(source_logits, target_logits)
+                        source_logits = {
+                            name: classifier_heads[name](
+                                gradient_scalar(_feature(backbone_features, name), -lambda_adv_this_iter)
+                            )
+                            for name in da_feature_channels
+                        }
+                        target_logits = {
+                            name: classifier_heads[name](
+                                gradient_scalar(_feature(target_backbone_features, name), -lambda_adv_this_iter)
+                            )
+                            for name in da_feature_channels
+                        }
+                        loss_da_image = da_img_faithful_loss_multi(source_logits, target_logits)
                         loss_da_image_this_iter = loss_da_image
                         loss = loss + opt.da_img_weight * loss_da_image
                     elif da_scale_this_iter > 0.0:
                         st_feat = backbone_feat[:B_s + B_t]
                         alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
                         loss_da_image, lambda_adv_this_iter, L_c_this_iter = advgrl_step(
-                            st_feat, source_count=B_s, classifier=classifier_head,
+                            st_feat, source_count=B_s, classifier=classifier_heads['sppf'],
                             use_advgrl=opt.advgrl, lambda_0=opt.da_img_grl_weight,
                             alpha=alpha, beta=opt.advgrl_threshold,
                         )
@@ -574,7 +627,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     loss_triplet_img=float(loss_triplet_img_this_iter.item()) if loss_triplet_img_this_iter is not None else '',
                     lambda_adv=lambda_adv_this_iter if lambda_adv_this_iter is not None else '',
                     L_c=L_c_this_iter if L_c_this_iter is not None else '',
-                    da_scale=da_scale_this_iter if classifier_head is not None else '',
+                    da_scale=da_scale_this_iter if classifier_heads is not None else '',
                 )
 
             # Optimize
@@ -639,7 +692,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                         'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None,
                         'date': datetime.now().isoformat(),
                         # DA additions (None when DA is off)
-                        'classifier': classifier_head.state_dict() if classifier_head is not None else None,
+                        'classifier': classifier_heads.state_dict() if classifier_heads is not None else None,
                         'advgrl_cfg': {
                             'lambda_0': opt.da_img_grl_weight,
                             'alpha': opt.advgrl_alpha,
@@ -756,6 +809,10 @@ def parse_opt(known=False):
     parser.add_argument('--da-img-warmup', type=str, default='off', choices=['off', 'gate', 'ramp'],
                         help='DA-loss warmup: off=apply from iter 0 (faithful original), '
                              'gate=zero during LR warmup, ramp=linear 0→1 over LR warmup')
+    parser.add_argument('--da-feat-layers', type=str, default='sppf',
+                        choices=['sppf', 'neck-p3', 'neck-p4', 'neck-p5', 'neck-all'],
+                        help='feature map(s) for image-level DA: sppf keeps current behavior; '
+                             'neck-* uses YOLOv5 PAN/FPN detection features')
     # AdvGRL flags (used in PR 3 - defined here so the namespace is stable)
     parser.add_argument('--advgrl', action='store_true', help='enable dynamic lambda_adv (requires --da-img)')
     parser.add_argument('--advgrl-threshold', type=float, default=30.0, help='beta - cap on adv_threshold')
@@ -783,6 +840,10 @@ def main(opt, callbacks=Callbacks()):
         raise SystemExit('--da-img-faithful requires --da-img-warmup off')
     if opt.da_img_warmup != 'off' and not opt.da_img:
         raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
+    if opt.da_feat_layers != 'sppf' and not opt.da_img:
+        raise SystemExit('--da-feat-layers requires --da-img')
+    if opt.da_feat_layers != 'sppf' and not opt.da_img_faithful:
+        raise SystemExit('--da-feat-layers neck-* currently requires --da-img-faithful')
     if opt.triplet_img and not opt.aux:
         raise SystemExit('--triplet-img requires --aux (triplet negative comes from aux loader)')
     if opt.triplet_img and not opt.da_img:

@@ -46,6 +46,8 @@ names: ['toy']
     (['--da-img'],                                                                 'daimg'),
     (['--da-img', '--da-img-faithful'],                                             'daimg_faithful'),
     (['--da-img', '--da-img-faithful', '--advgrl'],                                'daimg_faithful_advgrl'),
+    (['--da-img', '--da-img-faithful', '--advgrl', '--da-feat-layers', 'neck-p4'],  'daimg_faithful_advgrl_neck_p4'),
+    (['--da-img', '--da-img-faithful', '--advgrl', '--da-feat-layers', 'neck-all'], 'daimg_faithful_advgrl_neck_all'),
     (['--da-img', '--da-img-faithful', '--aux'],                                    'daimg_faithful_aux'),
     (['--da-img', '--da-img-faithful', '--aux', '--triplet-img'],                   'daimg_faithful_triplet'),
     (['--da-img', '--da-img-faithful', '--advgrl', '--aux', '--triplet-img'],       'daimg_faithful_full'),
