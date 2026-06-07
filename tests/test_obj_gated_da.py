@@ -1,7 +1,9 @@
+from argparse import Namespace
+
 import torch
 import torch.nn.functional as F
 
-from train_GRL import _build_objectness_gates, _weighted_da_bce_loss, da_img_faithful_gated_loss_multi
+from train_GRL import _build_objectness_gates, _weighted_da_bce_loss, da_img_faithful_gated_loss_multi, main
 
 
 def _detect_tensor(obj_logits):
@@ -91,3 +93,59 @@ def test_da_img_faithful_gated_loss_multi_averages_scales():
     actual = da_img_faithful_gated_loss_multi(source_logits, target_logits, source_gates, target_gates)
 
     assert torch.allclose(actual, expected)
+
+def _base_opt(**overrides):
+    values = dict(
+        weights='', cfg='configs/domain/yolov5l_GRL.yaml', data='domain/city_foggycity.yaml', hyp='hyps/hyp.scratch-high.yaml',
+        epochs=1, loss='origin', auxotaloss=False, otaloss='origin', batch_size=1, imgsz=64, rect=False, resume=False,
+        nosave=True, noval=True, noautoanchor=False, evolve=None, bucket='', cache=None, image_weights=False, device='cpu',
+        multi_scale=False, single_cls=False, optimizer='SGD', sync_bn=False, workers=0, project='runs/train', name='tmp',
+        exist_ok=True, quad=False, cos_lr=False, label_smoothing=0.0, patience=1, freeze=[0], save_period=-1, local_rank=-1,
+        entity=None, upload_dataset=False, bbox_interval=-1, artifact_alias='latest', da_img=False, da_img_weight=1.0,
+        da_img_grl_weight=0.1, da_img_warmup='off', advgrl=False, advgrl_threshold=30.0, advgrl_alpha=None, aux=False,
+        triplet_img=False, triplet_img_weight=0.1, triplet_margin=1.0, triplet_adaptive=False, triplet_max_margin=3.0,
+        da_img_faithful=False, da_feat_layers='sppf', da_img_obj_gate=False, da_img_obj_gate_floor=0.05,
+    )
+    values.update(overrides)
+    return Namespace(**values)
+
+
+def test_obj_gate_requires_da_img():
+    opt = _base_opt(da_img_obj_gate=True, da_img=False, da_img_faithful=True, da_feat_layers='neck-all')
+    try:
+        main(opt)
+    except SystemExit as exc:
+        assert '--da-img-obj-gate requires --da-img' in str(exc)
+    else:
+        raise AssertionError('expected SystemExit')
+
+
+def test_obj_gate_requires_faithful():
+    opt = _base_opt(da_img_obj_gate=True, da_img=True, da_img_faithful=False, da_feat_layers='neck-all')
+    try:
+        main(opt)
+    except SystemExit as exc:
+        assert '--da-img-obj-gate requires --da-img-faithful' in str(exc)
+    else:
+        raise AssertionError('expected SystemExit')
+
+
+def test_obj_gate_requires_neck_all():
+    opt = _base_opt(da_img_obj_gate=True, da_img=True, da_img_faithful=True, da_feat_layers='neck-p4')
+    try:
+        main(opt)
+    except SystemExit as exc:
+        assert '--da-img-obj-gate requires --da-feat-layers neck-all' in str(exc)
+    else:
+        raise AssertionError('expected SystemExit')
+
+
+def test_obj_gate_floor_must_be_non_negative():
+    opt = _base_opt(da_img_obj_gate=True, da_img=True, da_img_faithful=True, da_feat_layers='neck-all', da_img_obj_gate_floor=-0.1)
+    try:
+        main(opt)
+    except SystemExit as exc:
+        assert '--da-img-obj-gate-floor must be non-negative' in str(exc)
+    else:
+        raise AssertionError('expected SystemExit')
+

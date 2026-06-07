@@ -767,6 +767,11 @@ def parse_opt(known=False):
     parser.add_argument('--triplet-margin', type=float, default=1.0)
     parser.add_argument('--triplet-adaptive', action='store_true', help='adaptive margin ramp (requires --triplet-img)')
     parser.add_argument('--triplet-max-margin', type=float, default=3.0)
+    parser.add_argument('--da-img-faithful', action='store_true', help='use faithful source=0/target=1 image DA labels')
+    parser.add_argument('--da-feat-layers', type=str, default='sppf', choices=['sppf', 'neck-p4', 'neck-all'],
+                        help='feature layers for faithful image DA')
+    parser.add_argument('--da-img-obj-gate', action='store_true', help='weight faithful neck-all image DA by detached Detect objectness gates')
+    parser.add_argument('--da-img-obj-gate-floor', type=float, default=0.05, help='minimum objectness gate value for --da-img-obj-gate')
 
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     return opt
@@ -784,6 +789,14 @@ def main(opt, callbacks=Callbacks()):
         raise SystemExit('--triplet-img requires --da-img (target features come from the DA target loader)')
     if opt.triplet_adaptive and not opt.triplet_img:
         raise SystemExit('--triplet-adaptive requires --triplet-img')
+    if opt.da_img_obj_gate and not opt.da_img:
+        raise SystemExit('--da-img-obj-gate requires --da-img')
+    if opt.da_img_obj_gate and not opt.da_img_faithful:
+        raise SystemExit('--da-img-obj-gate requires --da-img-faithful')
+    if opt.da_img_obj_gate and opt.da_feat_layers != 'neck-all':
+        raise SystemExit('--da-img-obj-gate requires --da-feat-layers neck-all')
+    if opt.da_img_obj_gate_floor < 0:
+        raise SystemExit('--da-img-obj-gate-floor must be non-negative')
 
     # Checks
     if RANK in [-1, 0]:
