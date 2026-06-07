@@ -37,6 +37,18 @@ def da_img_faithful_loss_pair(source_logits: torch.Tensor, target_logits: torch.
     return 0.5 * source_loss + 0.5 * target_loss
 
 
+def da_img_faithful_loss_multi(
+    source_logits_by_name: dict[str, torch.Tensor],
+    target_logits_by_name: dict[str, torch.Tensor],
+) -> torch.Tensor:
+    """Average faithful YOLO-G image-level DA loss across selected feature maps."""
+    losses = [
+        da_img_faithful_loss_pair(source_logits_by_name[name], target_logits_by_name[name])
+        for name in source_logits_by_name
+    ]
+    return torch.stack(losses).mean()
+
+
 def triplet_img_loss(anchor: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor, margin: float = 1.0) -> torch.Tensor:
     """Image-level triplet loss: max(d(A,P) - d(A,N) + margin, 0).
 

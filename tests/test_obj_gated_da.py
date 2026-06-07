@@ -3,7 +3,7 @@ from argparse import Namespace
 import torch
 import torch.nn.functional as F
 
-from train_GRL import _build_objectness_gates, _weighted_da_bce_loss, da_img_faithful_gated_loss_multi, main
+from train_GRL import DA_FEATURE_CHANNELS, _build_objectness_gates, _weighted_da_bce_loss, da_img_faithful_gated_loss_multi, main
 
 
 def _detect_tensor(obj_logits):
@@ -149,3 +149,7 @@ def test_obj_gate_floor_must_be_non_negative():
     else:
         raise AssertionError('expected SystemExit')
 
+
+
+def test_neck_all_feature_selection_order_matches_detect_order():
+    assert list(DA_FEATURE_CHANNELS['neck-all']) == ['neck_p3', 'neck_p4', 'neck_p5']
