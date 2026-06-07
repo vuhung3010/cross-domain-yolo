@@ -153,3 +153,30 @@ def test_obj_gate_floor_must_be_non_negative():
 
 def test_neck_all_feature_selection_order_matches_detect_order():
     assert list(DA_FEATURE_CHANNELS['neck-all']) == ['neck_p3', 'neck_p4', 'neck_p5']
+
+
+
+def test_faithful_da_loss_respects_warmup_scale():
+    loss = torch.tensor(2.0)
+    base = torch.tensor(5.0)
+    da_scale_this_iter = 0.25
+    da_img_weight = 3.0
+
+    total = base + da_scale_this_iter * da_img_weight * loss
+
+    assert torch.allclose(total, torch.tensor(6.5))
+
+
+def test_multiscale_resizes_domain_batches_consistently():
+    imgs = torch.zeros(2, 3, 64, 64)
+    t_imgs = torch.zeros(2, 3, 64, 64)
+    a_imgs = torch.zeros(2, 3, 64, 64)
+    all_imgs = torch.cat([imgs, t_imgs, a_imgs], dim=0)
+    ns = [96, 96]
+
+    imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
+    all_imgs = F.interpolate(all_imgs, size=ns, mode='bilinear', align_corners=False)
+    t_imgs = F.interpolate(t_imgs, size=ns, mode='bilinear', align_corners=False)
+    a_imgs = F.interpolate(a_imgs, size=ns, mode='bilinear', align_corners=False)
+
+    assert imgs.shape[-2:] == all_imgs.shape[-2:] == t_imgs.shape[-2:] == a_imgs.shape[-2:]

@@ -59,11 +59,12 @@ def test_da_img_faithful_allows_aux_triplet_past_flag_validation():
     assert 'missing.yaml' in output or 'No such file' in output or 'does not exist' in output
 
 
-def test_da_img_faithful_requires_warmup_off():
-    assert_flag_error(
-        ['--da-img', '--da-img-faithful', '--da-img-warmup', 'ramp'],
-        '--da-img-faithful requires --da-img-warmup off',
-    )
+def test_da_img_faithful_allows_warmup_past_flag_validation():
+    result = run_train_grl_flags('--da-img', '--da-img-faithful', '--da-img-warmup', 'ramp', '--cfg', 'missing.yaml')
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert '--da-img-faithful requires --da-img-warmup off' not in output
+    assert 'missing.yaml' in output or 'No such file' in output or 'does not exist' in output
 
 
 def test_da_feat_layers_requires_da_img():

@@ -528,6 +528,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
                     imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
                     all_imgs = nn.functional.interpolate(all_imgs, size=ns, mode='bilinear', align_corners=False)
+                    if t_imgs is not None:
+                        t_imgs = nn.functional.interpolate(t_imgs, size=ns, mode='bilinear', align_corners=False)
+                    if a_imgs is not None:
+                        a_imgs = nn.functional.interpolate(a_imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
             with amp.autocast(enabled=cuda):
@@ -576,14 +580,15 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                             target_gates = _build_objectness_gates(
                                 target_det_pred, feature_names, floor=opt.da_img_obj_gate_floor)
 
-                        source_logits_detached = {
-                            name: classifier_heads[name](_feature(backbone_features, name).detach())
-                            for name in da_feature_channels
-                        }
-                        target_logits_detached = {
-                            name: classifier_heads[name](_feature(target_backbone_features, name).detach())
-                            for name in da_feature_channels
-                        }
+                        with torch.no_grad():
+                            source_logits_detached = {
+                                name: classifier_heads[name](_feature(backbone_features, name))
+                                for name in da_feature_channels
+                            }
+                            target_logits_detached = {
+                                name: classifier_heads[name](_feature(target_backbone_features, name))
+                                for name in da_feature_channels
+                            }
                         if opt.da_img_obj_gate:
                             L_c_tensor = da_img_faithful_gated_loss_multi(
                                 source_logits_detached, target_logits_detached, source_gates, target_gates)
@@ -618,7 +623,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                         else:
                             loss_da_image = da_img_faithful_loss_multi(source_logits, target_logits)
                         loss_da_image_this_iter = loss_da_image
-                        loss = loss + opt.da_img_weight * loss_da_image
+                        loss = loss + da_scale_this_iter * opt.da_img_weight * loss_da_image
                     elif da_scale_this_iter > 0.0:
                         st_feat = backbone_feat[:B_s + B_t]
                         alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
@@ -901,8 +906,6 @@ def main(opt, callbacks=Callbacks()):
         raise SystemExit('--da-img-obj-gate-floor must be non-negative')
     if opt.da_img_faithful and not opt.da_img:
         raise SystemExit('--da-img-faithful requires --da-img')
-    if opt.da_img_faithful and opt.da_img_warmup != 'off':
-        raise SystemExit('--da-img-faithful requires --da-img-warmup off')
     if opt.da_img_warmup != 'off' and not opt.da_img:
         raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
     if opt.da_feat_layers != 'sppf' and not opt.da_img:
