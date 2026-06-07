@@ -26,6 +26,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -88,6 +89,25 @@ def _build_objectness_gates(det_pred, feature_names, floor=0.05):
         obj = pred[..., 4].sigmoid().amax(dim=1, keepdim=True).clamp_min(floor)
         gates[name] = obj.detach()
     return gates
+
+
+def _weighted_da_bce_loss(logits, target_value, gate):
+    """Spatial BCE weighted by detached objectness gate, normalized by gate mass."""
+    target = torch.full_like(logits, float(target_value))
+    raw = F.binary_cross_entropy_with_logits(logits, target, reduction='none')
+    if gate.shape != raw.shape:
+        raise ValueError(f'gate shape {tuple(gate.shape)} must match logits shape {tuple(raw.shape)}')
+    return (raw * gate).sum() / gate.sum().clamp_min(1.0)
+
+
+def da_img_faithful_gated_loss_multi(source_logits, target_logits, source_gates, target_gates):
+    """Faithful source=0/target=1 DA loss averaged over gated neck-all scales."""
+    losses = []
+    for name in source_logits:
+        source_loss = _weighted_da_bce_loss(source_logits[name], 0.0, source_gates[name])
+        target_loss = _weighted_da_bce_loss(target_logits[name], 1.0, target_gates[name])
+        losses.append(0.5 * source_loss + 0.5 * target_loss)
+    return torch.stack(losses).mean()
 
 
 def _gap_mean(feat_slice):
