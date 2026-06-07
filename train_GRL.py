@@ -72,6 +72,24 @@ RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 
 
+def _build_objectness_gates(det_pred, feature_names, floor=0.05):
+    """Build detached [B,1,H,W] objectness gates for faithful neck-all DA."""
+    expected = ['neck_p3', 'neck_p4', 'neck_p5']
+    if list(feature_names) != expected:
+        raise ValueError('--da-img-obj-gate is only supported with --da-feat-layers neck-all')
+    if floor < 0:
+        raise ValueError('--da-img-obj-gate-floor must be non-negative')
+    if not isinstance(det_pred, (list, tuple)) or len(det_pred) < 3:
+        raise ValueError('Detect predictions must be a P3/P4/P5 list for objectness gates')
+
+    gates = {}
+    for name, pred in zip(expected, det_pred[:3]):
+        # Training Detect output layout is [B, anchors, H, W, outputs].
+        obj = pred[..., 4].sigmoid().amax(dim=1, keepdim=True).clamp_min(floor)
+        gates[name] = obj.detach()
+    return gates
+
+
 def _gap_mean(feat_slice):
     """Global average pool per image, then batch-mean -> [1, C] centroid for a domain slice."""
     return feat_slice.mean(dim=[2, 3]).mean(dim=0, keepdim=True)
