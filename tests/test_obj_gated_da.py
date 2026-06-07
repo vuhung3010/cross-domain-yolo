@@ -69,6 +69,31 @@ def test_weighted_da_bce_loss_uses_clamp_when_gate_sum_below_one():
     assert torch.allclose(actual, expected)
 
 
+
+def test_weighted_da_bce_loss_resizes_gate_spatial_dims():
+    logits = torch.zeros(1, 1, 2, 2)
+    gate = torch.tensor([[[[0.25]]]])
+    raw = F.binary_cross_entropy_with_logits(logits, torch.ones_like(logits), reduction='none')
+    expected_gate = F.interpolate(gate, size=logits.shape[2:], mode='nearest')
+    expected = (raw * expected_gate).sum() / expected_gate.sum().clamp_min(1.0)
+
+    actual = _weighted_da_bce_loss(logits, 1.0, gate)
+
+    assert torch.allclose(actual, expected)
+
+
+def test_weighted_da_bce_loss_rejects_incompatible_batch_or_channels():
+    logits = torch.zeros(1, 1, 2, 2)
+    bad_gates = [torch.ones(2, 1, 2, 2), torch.ones(1, 2, 2, 2)]
+
+    for gate in bad_gates:
+        try:
+            _weighted_da_bce_loss(logits, 1.0, gate)
+        except ValueError as exc:
+            assert 'batch/channels' in str(exc)
+        else:
+            raise AssertionError('expected ValueError')
+
 def test_da_img_faithful_gated_loss_multi_averages_scales():
     source_logits = {
         'neck_p3': torch.zeros(1, 1, 1, 1),

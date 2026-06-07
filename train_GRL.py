@@ -119,7 +119,9 @@ def _weighted_da_bce_loss(logits, target_value, gate):
     target = torch.full_like(logits, float(target_value))
     raw = F.binary_cross_entropy_with_logits(logits, target, reduction='none')
     if gate.shape != raw.shape:
-        raise ValueError(f'gate shape {tuple(gate.shape)} must match logits shape {tuple(raw.shape)}')
+        if gate.shape[:2] != raw.shape[:2]:
+            raise ValueError(f'gate shape {tuple(gate.shape)} must match logits batch/channels {tuple(raw.shape[:2])}')
+        gate = F.interpolate(gate, size=raw.shape[2:], mode='nearest')
     return (raw * gate).sum() / gate.sum().clamp_min(1.0)
 
 
@@ -582,11 +584,11 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
                         with torch.no_grad():
                             source_logits_detached = {
-                                name: classifier_heads[name](_feature(backbone_features, name))
+                                name: classifier_heads[name](_feature(backbone_features, name).detach())
                                 for name in da_feature_channels
                             }
                             target_logits_detached = {
-                                name: classifier_heads[name](_feature(target_backbone_features, name))
+                                name: classifier_heads[name](_feature(target_backbone_features, name).detach())
                                 for name in da_feature_channels
                             }
                         if opt.da_img_obj_gate:

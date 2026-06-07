@@ -120,3 +120,26 @@ def test_advgrl_step_hard_regime_triggers():
     )
     assert L_c < 1.0, f"expected L_c in hard regime, got {L_c}"
     assert lambda_adv > 0.1, f"expected hard-regime lambda > lambda_0, got {lambda_adv}"
+
+
+
+def test_advgrl_step_lc_pass_detaches_features():
+    class ProbeHead(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(()))
+            self.requires_grad_seen = []
+
+        def forward(self, x):
+            self.requires_grad_seen.append(x.requires_grad)
+            return x[:, :1] * self.weight
+
+    head = ProbeHead()
+    feat = torch.randn(4, 2, 2, 2, requires_grad=True)
+
+    advgrl_step(
+        feat, source_count=2, classifier=head,
+        use_advgrl=True, lambda_0=0.1, alpha=default_alpha(), beta=30.0,
+    )
+
+    assert head.requires_grad_seen == [False, True]
