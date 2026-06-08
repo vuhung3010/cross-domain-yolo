@@ -26,6 +26,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -93,6 +94,45 @@ def _feature(features, name):
     if name == 'sppf':
         return features
     raise ValueError(f'model did not return feature dict needed for {name}')
+
+
+def _build_objectness_gates(det_pred, feature_names, floor=0.05):
+    """Build detached [B,1,H,W] objectness gates for faithful neck-all DA."""
+    expected = ['neck_p3', 'neck_p4', 'neck_p5']
+    if list(feature_names) != expected:
+        raise ValueError('--da-img-obj-gate is only supported with --da-feat-layers neck-all')
+    if floor < 0:
+        raise ValueError('--da-img-obj-gate-floor must be non-negative')
+    if not isinstance(det_pred, (list, tuple)) or len(det_pred) < 3:
+        raise ValueError('Detect predictions must be a P3/P4/P5 list for objectness gates')
+
+    gates = {}
+    for name, pred in zip(expected, det_pred[:3]):
+        # Training Detect output layout is [B, anchors, H, W, outputs].
+        obj = pred[..., 4].sigmoid().amax(dim=1, keepdim=True).clamp_min(floor)
+        gates[name] = obj.detach()
+    return gates
+
+
+def _weighted_da_bce_loss(logits, target_value, gate):
+    """Spatial BCE weighted by detached objectness gate, normalized by gate mass."""
+    target = torch.full_like(logits, float(target_value))
+    raw = F.binary_cross_entropy_with_logits(logits, target, reduction='none')
+    if gate.shape != raw.shape:
+        if gate.shape[:2] != raw.shape[:2]:
+            raise ValueError(f'gate shape {tuple(gate.shape)} must match logits batch/channels {tuple(raw.shape[:2])}')
+        gate = F.interpolate(gate, size=raw.shape[2:], mode='nearest')
+    return (raw * gate).sum() / gate.sum().clamp_min(1.0)
+
+
+def da_img_faithful_gated_loss_multi(source_logits, target_logits, source_gates, target_gates):
+    """Faithful source=0/target=1 DA loss averaged over gated neck-all scales."""
+    losses = []
+    for name in source_logits:
+        source_loss = _weighted_da_bce_loss(source_logits[name], 0.0, source_gates[name])
+        target_loss = _weighted_da_bce_loss(target_logits[name], 1.0, target_gates[name])
+        losses.append(0.5 * source_loss + 0.5 * target_loss)
+    return torch.stack(losses).mean()
 
 
 def _gap_mean(feat_slice):
@@ -490,12 +530,16 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
                     imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
                     all_imgs = nn.functional.interpolate(all_imgs, size=ns, mode='bilinear', align_corners=False)
+                    if t_imgs is not None:
+                        t_imgs = nn.functional.interpolate(t_imgs, size=ns, mode='bilinear', align_corners=False)
+                    if a_imgs is not None:
+                        a_imgs = nn.functional.interpolate(a_imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
             with amp.autocast(enabled=cuda):
                 if opt.da_img_faithful:
                     det_pred, backbone_features = model(imgs)
-                    _, target_backbone_features = model(t_imgs)
+                    target_det_pred, target_backbone_features = model(t_imgs)
                     aux_backbone_features = None
                     B_t = t_imgs.size(0)
                     B_a = a_imgs.size(0) if a_imgs is not None else 0
@@ -529,15 +573,29 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 if classifier_heads is not None:
                     da_scale_this_iter = compute_da_warmup_scale(ni=ni, nw=nw, mode=opt.da_img_warmup)
                     if opt.da_img_faithful:
-                        source_logits_detached = {
-                            name: classifier_heads[name](_feature(backbone_features, name).detach())
-                            for name in da_feature_channels
-                        }
-                        target_logits_detached = {
-                            name: classifier_heads[name](_feature(target_backbone_features, name).detach())
-                            for name in da_feature_channels
-                        }
-                        L_c_tensor = da_img_faithful_loss_multi(source_logits_detached, target_logits_detached)
+                        source_gates = None
+                        target_gates = None
+                        if opt.da_img_obj_gate:
+                            feature_names = list(da_feature_channels)
+                            source_gates = _build_objectness_gates(
+                                det_pred_src, feature_names, floor=opt.da_img_obj_gate_floor)
+                            target_gates = _build_objectness_gates(
+                                target_det_pred, feature_names, floor=opt.da_img_obj_gate_floor)
+
+                        with torch.no_grad():
+                            source_logits_detached = {
+                                name: classifier_heads[name](_feature(backbone_features, name).detach())
+                                for name in da_feature_channels
+                            }
+                            target_logits_detached = {
+                                name: classifier_heads[name](_feature(target_backbone_features, name).detach())
+                                for name in da_feature_channels
+                            }
+                        if opt.da_img_obj_gate:
+                            L_c_tensor = da_img_faithful_gated_loss_multi(
+                                source_logits_detached, target_logits_detached, source_gates, target_gates)
+                        else:
+                            L_c_tensor = da_img_faithful_loss_multi(source_logits_detached, target_logits_detached)
                         L_c_this_iter = float(L_c_tensor.item())
                         if opt.advgrl:
                             alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
@@ -561,9 +619,13 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                             )
                             for name in da_feature_channels
                         }
-                        loss_da_image = da_img_faithful_loss_multi(source_logits, target_logits)
+                        if opt.da_img_obj_gate:
+                            loss_da_image = da_img_faithful_gated_loss_multi(
+                                source_logits, target_logits, source_gates, target_gates)
+                        else:
+                            loss_da_image = da_img_faithful_loss_multi(source_logits, target_logits)
                         loss_da_image_this_iter = loss_da_image
-                        loss = loss + opt.da_img_weight * loss_da_image
+                        loss = loss + da_scale_this_iter * opt.da_img_weight * loss_da_image
                     elif da_scale_this_iter > 0.0:
                         st_feat = backbone_feat[:B_s + B_t]
                         alpha = opt.advgrl_alpha if opt.advgrl_alpha is not None else default_alpha()
@@ -825,6 +887,8 @@ def parse_opt(known=False):
     parser.add_argument('--triplet-margin', type=float, default=1.0)
     parser.add_argument('--triplet-adaptive', action='store_true', help='adaptive margin ramp (requires --triplet-img)')
     parser.add_argument('--triplet-max-margin', type=float, default=3.0)
+    parser.add_argument('--da-img-obj-gate', action='store_true', help='weight faithful neck-all image DA by detached Detect objectness gates')
+    parser.add_argument('--da-img-obj-gate-floor', type=float, default=0.05, help='minimum objectness gate value for --da-img-obj-gate')
 
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     return opt
@@ -834,10 +898,16 @@ def main(opt, callbacks=Callbacks()):
     # Flag dependency validation (see spec section 4.2)
     if opt.advgrl and not opt.da_img:
         raise SystemExit('--advgrl requires --da-img (no DA classifier means no L_c to gate on)')
+    if opt.da_img_obj_gate and not opt.da_img:
+        raise SystemExit('--da-img-obj-gate requires --da-img')
+    if opt.da_img_obj_gate and not opt.da_img_faithful:
+        raise SystemExit('--da-img-obj-gate requires --da-img-faithful')
+    if opt.da_img_obj_gate and opt.da_feat_layers != 'neck-all':
+        raise SystemExit('--da-img-obj-gate requires --da-feat-layers neck-all')
+    if opt.da_img_obj_gate_floor < 0:
+        raise SystemExit('--da-img-obj-gate-floor must be non-negative')
     if opt.da_img_faithful and not opt.da_img:
         raise SystemExit('--da-img-faithful requires --da-img')
-    if opt.da_img_faithful and opt.da_img_warmup != 'off':
-        raise SystemExit('--da-img-faithful requires --da-img-warmup off')
     if opt.da_img_warmup != 'off' and not opt.da_img:
         raise SystemExit('--da-img-warmup requires --da-img (no DA classifier to warm up)')
     if opt.da_feat_layers != 'sppf' and not opt.da_img:
