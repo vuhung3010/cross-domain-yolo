@@ -1,0 +1,64 @@
+id,method,run_name,class,images,labels,precision,recall,ap50,ap5095,notes
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,all,500,10168,0.819,0.347,0.412,0.263,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,bus,500,98,0.876,0.316,0.383,0.324,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,bicycle,500,1171,0.779,0.325,0.39,0.204,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,car,500,4667,0.927,0.432,0.58,0.405,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,motorcycle,500,149,0.783,0.268,0.315,0.171,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,person,500,3415,0.781,0.4,0.483,0.276,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,rider,500,552,0.727,0.462,0.518,0.318,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,train,500,23,0.943,0.304,0.309,0.145,source-only baseline
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,truck,500,93,0.735,0.269,0.316,0.257,source-only baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,all,500,10168,0.781,0.374,0.437,0.269,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,bus,500,98,0.815,0.357,0.409,0.337,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,bicycle,500,1171,0.704,0.396,0.45,0.234,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,car,500,4667,0.906,0.465,0.601,0.413,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,motorcycle,500,149,0.92,0.309,0.382,0.195,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,person,500,3415,0.735,0.417,0.485,0.279,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,rider,500,552,0.695,0.486,0.538,0.326,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,train,500,23,0.864,0.348,0.354,0.156,fixed image-level DA baseline
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,truck,500,93,0.605,0.215,0.277,0.216,fixed image-level DA baseline
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,all,500,10168,0.759,0.358,0.42,0.254,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,bus,500,98,0.807,0.378,0.415,0.34,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,bicycle,500,1171,0.798,0.358,0.437,0.225,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,car,500,4667,0.921,0.446,0.585,0.406,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,motorcycle,500,149,0.723,0.295,0.338,0.172,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,person,500,3415,0.792,0.395,0.483,0.279,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,rider,500,552,0.712,0.453,0.514,0.314,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,train,500,23,0.697,0.261,0.279,0.0719,"deepest-feature AdvGRL, alpha 0.80"
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,truck,500,93,0.626,0.28,0.312,0.228,"deepest-feature AdvGRL, alpha 0.80"
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,all,500,10168,0.767,0.273,0.32,0.195,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,bus,500,98,0.815,0.296,0.332,0.265,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,bicycle,500,1171,0.779,0.26,0.327,0.158,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,car,500,4667,0.909,0.364,0.463,0.318,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,motorcycle,500,149,0.56,0.268,0.258,0.121,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,person,500,3415,0.782,0.313,0.387,0.217,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,rider,500,552,0.781,0.38,0.443,0.264,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,train,500,23,0.846,0.13,0.136,0.0569,triplet-only / aux extension if present
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,truck,500,93,0.66,0.172,0.213,0.156,triplet-only / aux extension if present
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,all,500,10168,0.81,0.29,0.357,0.225,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,bus,500,98,0.929,0.286,0.331,0.27,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,bicycle,500,1171,0.781,0.301,0.389,0.2,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,car,500,4667,0.937,0.39,0.527,0.373,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,motorcycle,500,149,0.762,0.242,0.274,0.134,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,person,500,3415,0.83,0.337,0.44,0.253,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,rider,500,552,0.798,0.38,0.468,0.291,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,train,500,23,0.521,0.13,0.14,0.0696,full aux/triplet combination
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,truck,500,93,0.922,0.256,0.283,0.208,full aux/triplet combination
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,all,500,10168,0.786,0.398,0.467,0.293,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,bus,500,98,0.869,0.388,0.478,0.388,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,bicycle,500,1171,0.751,0.368,0.441,0.226,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,car,500,4667,0.875,0.548,0.659,0.439,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,motorcycle,500,149,0.766,0.308,0.357,0.186,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,person,500,3415,0.79,0.417,0.496,0.279,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,rider,500,552,0.791,0.435,0.523,0.316,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,train,500,23,0.91,0.478,0.479,0.279,best multi-scale neck run
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,truck,500,93,0.541,0.241,0.3,0.232,best multi-scale neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,all,500,10168,0.755,0.396,0.461,0.281,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,bus,500,98,0.862,0.408,0.501,0.399,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,bicycle,500,1171,0.786,0.336,0.411,0.212,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,car,500,4667,0.836,0.561,0.651,0.438,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,motorcycle,500,149,0.706,0.309,0.363,0.176,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,person,500,3415,0.765,0.436,0.503,0.288,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,rider,500,552,0.803,0.426,0.51,0.32,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,train,500,23,0.593,0.391,0.384,0.14,foreground/objectness-gated neck run
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,truck,500,93,0.694,0.301,0.368,0.276,foreground/objectness-gated neck run

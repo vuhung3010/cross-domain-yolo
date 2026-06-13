@@ -1,0 +1,8 @@
+id,method,run_name,status,message
+A1,Source-only YOLO-G detector,sanity_pr1_baseline,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/sanity_pr1_baseline[0m
+A2,YOLO-G image-level domain adaptation,city_foggycity_advgrl_faithful,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful[0m
+A3,Adaptive gradient reversal,city_foggycity_advgrl_faithful_alpha080,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful_alpha080[0m
+A4,RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_triplet_50ep,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful_triplet_50ep[0m
+A5,Adaptive gradient reversal with RainMix-coupled triplet adaptation,city_foggycity_advgrl_faithful_full_12,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful_full_12[0m
+A6,Adaptive gradient reversal with multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_50ep,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful_neck_all_alpha075_50ep[0m
+A7,Adaptive gradient reversal with foreground-gated multi-scale neck adaptation,city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep,ok,Results saved to [1m/root/yolo-g-modal/runs/per_class_val/city_foggycity_advgrl_faithful_neck_all_alpha075_objgate_50ep[0m

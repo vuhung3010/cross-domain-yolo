@@ -1,0 +1,1382 @@
+Adaptive Gradient Reversal for Domain-Adaptive YOLO-G Object
+                Detection Under Foggy Weather
+
+                                    Vu Hung / Project Team
+
+                                               2026
+
+
+Abstract
+Object detectors trained on clear-weather driving data often lose accuracy when evaluated under
+fog, where reduced contrast and visibility change image statistics without changing the semantic
+task. This report studies unsupervised domain adaptation for YOLO-G object detection from
+Cityscapes to Foggy Cityscapes. The central method is adaptive gradient reversal, which regulates
+adversarial feature-alignment strength using the current domain-classifier loss instead of applying
+a fixed reversal weight throughout training.
+Full-length ablations show that fixed image-level adaptation improves mAP@0.5 from 0.37841 to
+0.41195 over the source-only detector. The strongest verified setting combines adaptive gradient
+reversal with multi-scale neck adaptation, reaching 0.46665 mAP@0.5 and 0.28955 mAP@0.5:0.95,
+an absolute gain of 0.08824 over the source-only baseline. In contrast, the RainMix-coupled triplet
+extension underperforms both as an isolated extension and when combined with adaptive gradient
+reversal. These results support an AdvGRL-centered conclusion: regulating adversarial pressure
+and adapting multi-scale detector features are useful in this setting, while adding a synthetic rainy
+auxiliary domain through triplet learning introduces harmful or unstable representation pressure
+for fog-domain detection.
+
+
+1. Introduction
+1.1 Problem and Motivation
+Object detection systems trained on clear-weather driving images can degrade when deployed in
+foggy or rainy conditions. This report studies unsupervised domain adaptation for object detection
+from Cityscapes [1] to Foggy Cityscapes [2] using a YOLO-G / YOLOv5-L derived detector [3], [4].
+
+1.2 Research Question
+Can adaptive adversarial weighting through AdvGRL improve or stabilize YOLO-G image-level do-
+main adaptation compared with fixed-weight gradient reversal on Cityscapes -> Foggy Cityscapes?
+
+1.3 Contributions
+  1. An AdvGRL-centered domain adaptation training pipeline for YOLO-G.
+
+
+
+                                                 1
+  2. A controlled component-wise training design in which each domain-adaptation component
+     can be evaluated independently.
+  3. A full ablation protocol comparing source-only training, fixed image-level adaptation, Adv-
+     GRL, multi-scale neck adaptation, and RainMix-coupled triplet extensions.
+  4. An evidence-bounded failure analysis showing that the RainMix-coupled triplet extension
+     does not improve the AdvGRL-centered result.
+
+1.4 Code Provenance
+This work builds on a YOLO-G / YOLOv5-L detector derived from the YOLO family. The base
+detector and inherited training/validation components must be cited in the report body and ref-
+erence list. The project contribution is the domain-adaptation training methodology and ablation
+structure, not a detector backbone proposed from scratch.
+
+
+2. Related Work
+2.1 YOLO-Style Object Detection
+YOLO-style detectors remain a practical base for autonomous-driving perception because they com-
+bine a single-stage prediction pipeline with multi-scale detection heads that cover small, medium,
+and large objects in the same forward pass [4]. In the YOLO-G lineage used here, the detector
+inherits the familiar backbone-neck-head structure from the YOLO family and adapts it to the
+cross-domain detection setting rather than redesigning detection from scratch [3]. That choice mat-
+ters for this report because the methodological question is not whether a new detector backbone
+can outperform the old one, but whether a training-time adaptation strategy can improve the same
+detector under foggy-domain shift.
+
+2.2 Unsupervised Domain Adaptation for Object Detection
+Unsupervised domain adaptation for detection is harder than for classification because the model
+must preserve both category discrimination and localization quality while transferring from labeled
+source images to unlabeled target images. Feature alignment can help, but if it is applied too
+aggressively it may suppress cues needed for objectness or box regression. This tension is central
+to the present work: the detector must remain accurate on source semantics while becoming robust
+to the appearance shift introduced by fog.
+A detector also contains several feature levels with different roles. Shallow or neck-level features
+retain spatial detail that can matter for small objects, while deeper representations carry stronger
+semantic abstraction. Domain alignment at only one level may therefore miss part of the detection
+problem. If fog changes local contrast, object boundary clarity, and background texture, then
+adapting only the deepest feature may not correct the feature distributions used directly by multi-
+scale prediction heads. This observation motivates evaluating both image-level adaptation and
+multi-scale neck adaptation rather than assuming one feature level is suﬀicient.
+The detection setting also makes negative evidence important. A domain-adaptation objective
+can improve a global domain-confusion criterion while harming detection metrics. For example,
+a representation that is more domain-invariant may also be less discriminative for small or low-
+contrast objects. This report therefore treats mAP, precision, recall, and training diagnostics as
+
+
+
+                                                 2
+joint evidence. A method is not considered successful merely because it adds an adaptation loss; it
+must improve target-domain detection while remaining stable across the full training schedule.
+
+2.3 DANN and Gradient Reversal
+Domain-adversarial neural networks introduced gradient reversal as a simple way to turn domain
+confusion into a training signal [5]. A domain classifier is trained to separate source and target
+features, while the feature extractor receives the opposite gradient and learns representations that
+make the domains harder to distinguish. The fixed image-level adaptation baseline in this report
+follows that template. Its value is mainly comparative: it establishes whether ordinary fixed-weight
+adversarial alignment helps on Foggy Cityscapes before introducing adaptive weighting.
+
+2.4 Adaptive Adversarial Weighting
+Adaptive adversarial weighting extends the DANN idea by changing the reversal strength during
+training rather than keeping it constant. The AdvGRL design studied here follows the domain-
+adaptive foggy-weather detection work of Li et al. [6]. AdvGRL is the main method of this report
+because it uses the current classifier state to determine how strongly the detector should be pushed
+toward domain confusion. That makes the adaptation pressure responsive to training progress.
+If the domain classifier is too uncertain or too strong, a fixed weight may either undertrain or
+destabilize the detector; an adaptive rule is intended to mitigate that mismatch.
+
+2.5 Weather Robustness and Synthetic Domains
+Foggy Cityscapes is a standard stress test for weather robustness because the target domain changes
+visibility, contrast, and background structure without changing the underlying driving scene se-
+mantics [2]. Synthetic rain or fog can be useful as a source of additional variation, but it is not
+guaranteed to approximate the target shift. This matters for RainMix: a synthetic rainy domain
+can plausibly serve as a contrastive auxiliary domain, yet it can also introduce statistics that differ
+too much from fog and therefore harm adaptation instead of helping it.
+
+
+3. Data
+3.1 Source Domain: Cityscapes
+Cityscapes provides the labeled source domain [1]. It contains urban street scenes with dense
+annotations for common driving objects and a clear-weather appearance that is useful for supervised
+detector pretraining. In this report, Cityscapes is treated as the source domain that supplies
+detection supervision during training. The precise split and image definitions are recorded in
+the supplementary package so that the main report can remain method-focused while still being
+reproducible.
+
+3.2 Target Domain: Foggy Cityscapes
+Foggy Cityscapes is the unlabeled target domain during adaptation and the evaluation target for
+the final metrics [2]. It preserves the Cityscapes semantic structure while adding fog-induced
+appearance shift, which makes it well suited for studying whether domain adaptation improves
+detection under reduced visibility. Target annotations are not used to train the adaptation losses;
+they are reserved for validation and final reporting.
+
+
+                                                  3
+3.3 Auxiliary Domain: RainMix
+RainMix is an auxiliary synthetic-weather domain used only when the triplet objective is active. It
+does not define a separate main-paper method row because its role is to provide the negative aux-
+iliary distribution in the RainMix-coupled triplet formulation. The value of this auxiliary domain
+is therefore conditional: it matters only insofar as it participates in the triplet loss, and its utility
+must be judged by the ablation evidence rather than assumed from its presence.
+
+3.4 Preprocessing and Training Inputs
+All compared runs use the same image size and general detector preprocessing so that method
+differences are not confounded by unrelated data handling. Source batches supply the supervised
+detection loss, target batches supply unlabeled adaptation signals, and auxiliary RainMix batches
+are concatenated only for the triplet variants. That loader structure matters because it preserves
+a clear separation between source supervision, target adaptation, and auxiliary negative-domain
+pressure.
+The same loader discipline also makes the experimental interpretation cleaner. If a method im-
+proves target performance, the improvement cannot be explained by a different image resolution,
+a different training split, or a different data stream arrangement. Likewise, if a method fails, the
+failure is more likely attributable to the adaptation objective itself. This is particularly relevant
+for RainMix-coupled triplet learning, where the auxiliary domain is not merely extra data but a
+required component of the loss definition.
+
+3.5 Split Design and Evaluation Logic
+The source, target, and auxiliary roles are deliberately asymmetric. Cityscapes contributes labels
+and serves as the supervised reference distribution. Foggy Cityscapes contributes unlabeled target
+images during adaptation and labeled images only for validation and final reporting. RainMix
+contributes unlabeled auxiliary samples only when the triplet objective is enabled. That asymmetry
+reflects the actual optimization structure and keeps the report’s methodological claims aligned with
+the loss definitions.
+This split design also supports fair comparison across methods. A source-only baseline does not
+see target or auxiliary data. Fixed image-level adaptation sees source and target but no RainMix.
+AdvGRL inherits the same source-target pairing while modifying the way adversarial pressure is
+computed. The full original method adds RainMix-coupled triplet learning on top of that. Because
+each row changes only one conceptual component at a time, the resulting ablation table can be
+interpreted as a sequence of controlled perturbations rather than as an uncontrolled mixture of
+settings.
+
+3.6 Dataset Limitations
+This study is limited to one principal source-target pair, which keeps the ablation clear but prevents
+broad claims across weather types or datasets. The auxiliary RainMix domain is synthetic and
+therefore imperfectly matched to fog; this mismatch is likely part of why the triplet extension
+underperforms. A stronger reproducibility package would also record full data manifests, counts,
+and generation scripts for every split so that the exact train/validation composition is transparent.
+The limitation is methodological as well as empirical. The report evaluates whether one adaptation
+design helps under one target shift, not whether the design generalizes to every driving-weather
+
+                                                   4
+benchmark. That narrower scope is appropriate for a final report because it permits direct evidence
+tracing. It also avoids overstating the negative result on RainMix: the result is specific to this fog-
+domain task and should not be read as a universal verdict on all auxiliary-domain or metric-learning
+strategies.
+
+
+4. Methods
+4.1 Overall Architecture
+This project studies domain adaptation as a training-method change around a YOLO-G / YOLOv5-
+L detector rather than as a new detector backbone. The detector retains the inherited YOLO-style
+pipeline: images pass through a convolutional backbone and multi-scale feature neck, and the
+detection head predicts objectness, class probabilities, and bounding-box coordinates at multiple
+spatial resolutions. Domain-adaptation objectives are attached to intermediate representations
+during training while the detector architecture remains fixed across comparisons.
+The method separates detection prediction from adaptation optimization. The detector produces
+predictions and intermediate feature tensors, whereas domain classification, gradient reversal,
+auxiliary-domain processing, and adaptation losses are applied externally during optimization.
+This separation ensures that every comparison uses the same detector capacity and differs only
+in its training objective. Consequently, performance changes can be attributed to individual
+adaptation components rather than architectural differences.
+The overall objective contains supervised detection loss on labeled source-domain Cityscapes im-
+ages and, when applicable, one or more adaptation losses using unlabeled target-domain Foggy
+Cityscapes images. Target images influence the representation through adversarial or metric-
+learning objectives, but target annotations are excluded from training and reserved for evaluation.
+This design creates a useful separation between detector capacity and adaptation behavior. The
+detector is not enlarged for one row and reduced for another. Instead, the comparison asks how the
+same detector responds when different training signals are attached to its representations. That
+is why the report emphasizes optimization dynamics, feature level, and objective interaction. The
+central question is not whether YOLO-G can detect objects in fog at all, but whether a controlled
+adaptation signal can improve its target-domain behavior without damaging the detection task.
+The architecture can be read as three interacting systems. The first is the supervised detector, which
+must maintain objectness, localization, and classification accuracy. The second is the adversarial
+domain-classification system, which attempts to remove domain-specific information from selected
+features. The third is the optional auxiliary-domain metric-learning system, which imposes a
+geometric relation among source, target, and RainMix representations. The ablation study tests
+these systems separately because their gradients may cooperate, conflict, or dominate each other
+depending on where and when they are applied.
+
+4.2 Source-Only Baseline
+The source-only baseline trains the detector on labeled Cityscapes images without target-domain
+adaptation. It provides the reference point for all comparisons: every adaptation variant uses the
+same initialization, detector configuration, image resolution, and training schedule, differing only
+in the additional adaptation objective.
+
+
+
+                                                  5
+This baseline anchors both quantitative ablations and qualitative detection comparisons. It mea-
+sures the unadapted detector’s degradation under the clear-to-foggy domain shift and establishes
+whether each proposed adaptation strategy produces a genuine target-domain benefit.
+
+4.3 Fixed Image-Level Domain Adaptation
+The fixed image-level adaptation baseline adds a binary domain classifier to intermediate detector
+features. The classifier learns to distinguish source from target representations, while a gradient
+reversal layer sends sign-reversed gradients into the detector. The resulting minimax objective
+encourages the feature extractor to preserve detection-relevant information while reducing domain-
+specific information.
+During each adaptation iteration, the source batch contributes supervised detection loss and source-
+domain labels for the domain classifier. The target batch contributes target-domain labels only to
+the domain-classification objective. A lightweight convolutional domain head produces dense spatial
+logits, allowing alignment across feature-map locations rather than through only one globally pooled
+vector. The gradient reversal operation is identity-valued during the forward pass and multiplies
+the backward feature gradient by a fixed negative scalar.
+This fixed-weight baseline is important even when unstable. Earlier short-run evaluations showed
+that applying full adversarial pressure from the beginning can severely degrade detection perfor-
+mance. That behavior motivates adaptive gradient reversal and gradual adaptation warmup as
+training-dynamics interventions.
+
+4.4 AdvGRL: Main Method
+AdvGRL is the main method of this report. Its purpose is to adapt the adversarial gradient strength
+to the current state of the domain classifier. A fixed GRL weight assumes the same adversarial
+pressure is appropriate at every iteration. AdvGRL instead measures the classifier state first,
+computes a per-iteration 𝜆adv , and then applies that value to the GRL-attached DA loss.
+The implementation uses two DA-classifier passes. The first pass is detached from the detector fea-
+tures and computes a scalar classifier loss 𝐿𝑐 . This pass measures how the domain classifier behaves
+without updating the detector backbone through the measurement itself. The second pass applies
+gradient reversal to the live features and computes the actual DA loss used for backpropagation.
+Thus, 𝐿𝑐 controls the adversarial weight, while the second pass supplies the optimization signal.
+The effective weight follows the AdvGRL rule:
+$\lambda_{\mathrm{adv}} = \lambda_0 \min(\beta, 1 / L_c)$ if $L_c \le \alpha$
+$\lambda_{\mathrm{adv}} = \lambda_0$ otherwise
+Here 𝜆0 is the base reversal weight, 𝛽 caps the multiplicative factor, and 𝛼 is the threshold separating
+the ordinary regime from the adaptive hard regime. The default 𝛼 follows the adaptive-gradient
+design from domain-adaptive foggy-weather detection [6], computed as binary cross-entropy with
+logits on predictions [0.7, 0.3] against labels [1, 0]. The resulting negative gradient scale
+performs reversal during the second pass.
+The central hypothesis is that adversarial pressure should respond to the domain-classifier state
+rather than remain fixed throughout training. The final evaluation therefore prioritizes the com-
+parison between adaptive and fixed image-level adaptation. RainMix, triplet loss, warmup, and
+objectness gating are supporting or extension components unless final ablations prove otherwise.
+
+                                                   6
+The two-pass structure is important because it avoids using the same computation both to measure
+the classifier state and to update the detector representation. In the first pass, the detector features
+are treated as fixed with respect to the adaptive-weight calculation. In the second pass, the selected
+weight is applied to the reversed gradient that reaches the detector. This makes the adaptive signal
+easier to interpret: the classifier loss is a control variable, while the adversarial loss remains the
+optimization objective.
+AdvGRL also changes the failure modes that should be inspected. A fixed reversal weight can fail
+by being too weak to align domains or too strong to preserve detection features. An adaptive rule
+can fail differently: it may react to the classifier loss in a way that amplifies noisy measurements,
+saturates the cap too often, or changes the training signal at the wrong representation level. For
+that reason, the report includes diagnostic curves rather than only final mAP. The method should
+be judged by both final target accuracy and whether its internal control variables behave plausibly
+over training.
+The final results show that adaptive weighting alone is not suﬀicient. The deepest-feature AdvGRL
+row does not beat fixed image-level adaptation, while multi-scale neck AdvGRL produces the
+strongest result. This does not invalidate the AdvGRL hypothesis; it refines it. Adaptive adversarial
+pressure appears most useful when applied to the feature levels that directly support detection
+across object scales. The method contribution is therefore best stated as adaptive multi-scale
+adversarial alignment rather than as a claim that any use of adaptive weighting is automatically
+superior.
+
+4.5 DA Warmup
+DA warmup controls when the DA loss reaches full strength. The motivation is empirical and prac-
+tical: short-run sanity gates showed that fixed DA and early AdvGRL variants could collapse when
+the domain-adversarial signal was applied too aggressively while the detector was still stabilizing.
+Warmup is not the main contribution, but it is an important stability mechanism to evaluate.
+Three warmup modes are considered. The first applies the adaptation loss at full strength whenever
+adaptation is enabled. The second suppresses the adaptation loss during the learning-rate warmup
+window and turns it on afterward. The third linearly increases the adaptation-loss scale from zero
+to one across the warmup window. This scale multiplies the image-level adaptation loss before it
+is added to the total training loss.
+The report should distinguish engineering sanity from final evidence. A 10-epoch run can show
+whether the code crashes, produces NaNs, or has unbounded losses, but it should not be used
+to rank DA variants. Warmup results should therefore be interpreted using full ablations and
+diagnostic curves, especially loss_da_image, 𝐿𝑐 , and 𝜆adv .
+
+4.6 Foreground/Objectness-Gated Neck-All DA
+The foreground/objectness-gated extension applies DA more selectively to spatial regions likely to
+contain objects. Instead of aligning every spatial location equally, it uses the detector’s objectness
+predictions to construct a detached gate. This is a foreground-aware variant of image-level DA
+intended to reduce background-dominated alignment.
+The implemented version uses separate source and target adaptation passes over three neck scales,
+denoted P3, P4, and P5. For each scale, detection objectness logits are passed through a sigmoid,
+maximized over anchors, clamped to a minimum value of 0.05, and detached from the computation
+
+                                                   7
+graph. The resulting objectness map weights the spatial binary-cross-entropy domain loss, and the
+weighted loss is normalized by the total gate mass. Source samples use domain label 0, target
+samples use domain label 1, and the final multi-scale adaptation loss averages the three neck-scale
+losses.
+When combined with AdvGRL, the detached 𝐿𝑐 probe uses the same gated objective as the GRL-
+attached pass. This avoids a mismatch where 𝜆adv would be computed from an ungated classifier
+loss but optimized with a gated loss. Unless final ablations show objectness gating is the strongest
+contribution, the report should frame it as a recent foreground-aware extension to the AdvGRL-
+centered method.
+The motivation for gating is strongest in dense driving scenes, where large portions of the image
+are road, sky, building facade, or texture that may not correspond to annotated objects. If the
+domain classifier mainly learns from those regions, the detector may spend adaptation capacity
+aligning background statistics rather than improving object detection. A foreground-weighted
+objective attempts to shift more of the adaptation pressure toward object-like spatial regions. This
+is conceptually attractive, but it also depends on the reliability of the detector’s own objectness
+predictions. Early in training, objectness estimates may be noisy, and a poor gate can suppress
+useful adaptation or emphasize false object regions.
+The completed result reflects this trade-off. The foreground-gated extension performs better than
+the source-only and fixed image-level baselines, which suggests that the idea is not degenerate.
+However, it does not exceed the ungated multi-scale neck AdvGRL result. The likely interpretation
+is that multi-scale adaptation is beneficial, but the current objectness gate does not add enough
+useful selectivity to compensate for the extra weighting bias it introduces. This makes gating a
+reasonable extension for future refinement rather than the central result of the report.
+
+4.7 RainMix Auxiliary Domain
+RainMix is not treated as an independent adaptation method in this report. Its role is to supply
+the auxiliary weather domain required by the triplet formulation. Without the triplet objective, the
+auxiliary rainy images do not express the intended source–target–auxiliary relationship in the loss.
+Therefore, RainMix appears in the main methodology as the auxiliary component of the triplet
+extension, not as a separate paper row.
+The rationale is that a synthetic rainy domain may provide a negative weather contrast for target
+fog features. This is plausible but risky: synthetic rain is not the same shift as fog, and artificial
+rain artifacts may not match the statistics of Foggy Cityscapes. The report should therefore discuss
+RainMix through the triplet-loss ablation and failure analysis rather than claiming RainMix alone
+as a method.
+A second reason for keeping the auxiliary domain explicit is interpretability. If RainMix is only
+mentioned in a run name or a supplement command, the reader may miss that the negative result
+is methodologically meaningful. By naming it in the methodology as the auxiliary domain for the
+triplet objective, the report clarifies that the failure is about a loss design, not about a stray dataset
+artifact.
+
+4.8 RainMix-Coupled Image-Level Triplet Objective
+The triplet objective uses source, target, and RainMix auxiliary-domain features to impose a metric-
+learning relation. The intended relation is that target features should be closer to source features
+
+                                                    8
+than to auxiliary rainy features. In principle, this can encourage target features to align with the
+labeled clear-weather source while treating the auxiliary domain as a negative weather contrast.
+This objective depends on RainMix because it requires a negative auxiliary distribution. It adds
+another optimization signal on top of detection and adversarial adaptation losses. That extra
+signal can be useful if the auxiliary domain is well chosen, but it can also push representations
+in an unhelpful direction if the negative domain does not reflect the target-domain shift. For
+this reason, the methods section explains the motivation, while the experiments and discussion
+determine whether the RainMix-coupled triplet objective is a useful extension or a failure mode.
+The triplet objective is therefore evaluated as a hypothesis about representation geometry. The
+desired geometry is simple: target fog features should move closer to labeled source features and far-
+ther from auxiliary rainy features. The risk is that the semantic and low-level dimensions do not sep-
+arate so cleanly. Fog and rain can both reduce visibility, alter contrast, and add weather-dependent
+artifacts, while clear-weather source images can still share scene layout and object content with
+both. If the negative domain is not semantically appropriate, the triplet loss may push the target
+away from useful weather-robust features rather than toward source-like object representations.
+This is why the report does not hide the negative triplet result. A failed auxiliary objective is still
+informative because it identifies a boundary of the method. It shows that the useful part of the
+current evidence is not simply “more domains” or “more losses,” but the specific combination of
+adaptive adversarial control and multi-scale detector features. The RainMix-coupled triplet result
+becomes a limitation and an experimental lesson: auxiliary domains require careful validation before
+they are treated as beneficial regularizers.
+
+4.9 Controlled Component-Wise Ablation Design
+The experimental design isolates meaningful methodological components while preserving the same
+detector architecture, data processing, and training entry point. The evaluated components are
+source-only training, fixed image-level adaptation, adaptive gradient reversal, warmup, RainMix-
+coupled triplet learning, multi-scale neck adaptation, and foreground/objectness-gated adaptation.
+RainMix is coupled to the triplet objective because that is where it enters the loss formulation as
+the auxiliary negative domain.
+This matters for attribution. If the full component combination underperforms adaptive gradient re-
+versal alone, that is not a contradiction; it means added components changed optimization dynamics
+or introduced domain mismatch. If the RainMix-coupled triplet objective fails, the component-wise
+design allows the report to isolate that failure rather than blaming the entire adaptation pipeline.
+The final ablation table is therefore part of the methodology itself, not merely a reporting conve-
+nience.
+
+Component                          Method role                        Narrative status
+Source-only training               supervised Cityscapes              baseline
+                                   reference
+Fixed image-level adaptation       DANN-style adversarial             baseline adaptation method
+                                   feature alignment
+Adaptive gradient reversal         dynamic adversarial weighting      main contribution
+                                   from classifier state
+Adaptation warmup                  controls early adversarial         stability mechanism
+                                   pressure
+
+                                                  9
+Component                          Method role                        Narrative status
+RainMix-coupled triplet            metric-learning regularizer        extension/failure analysis
+objective                          over source, target, and
+                                   auxiliary RainMix features
+Multi-scale neck adaptation        adaptation over P3/P4/P5           extension
+                                   representations
+Objectness-gated adaptation        foreground-weighted spatial        optional extension
+                                   alignment
+
+
+5. Experiments
+5.1 Experimental Setup
+The experiments evaluate unsupervised domain adaptation from clear-weather Cityscapes to Foggy
+Cityscapes. Source-domain images are used with detection labels during training. Target-domain
+images are used without labels for adaptation and with labels only for validation and final evaluation.
+All compared methods use the same YOLO-G / YOLOv5-L detector capacity, image resolution,
+optimization schedule, and data preprocessing so that performance differences can be attributed to
+the adaptation objective rather than to detector changes.
+The full experiments should report the hardware and software environment, including GPU model,
+CUDA version, Python version, deep-learning framework version, training length, image resolution,
+batch size, initialization weights, random seed handling, and any platform differences between runs.
+The final report should also state whether results are single-seed or multi-seed. If compute permits
+only one seed, the limitation should be stated directly and interpreted conservatively.
+Training uses the same source and target data definitions across all ablations. Auxiliary RainMix
+data are included for the triplet-learning variants, where RainMix supplies the auxiliary negative
+domain required by the loss. Short sanity runs are treated as wiring and stability checks; the final
+comparison should use full-length ablations before making method claims.
+All fair comparisons use the same batch size, image size, and nominal training length. This matters
+because domain-adaptation losses are sensitive to batch composition: changing the number of source
+or target images per update can change both the supervised detection gradient and the adversarial
+domain-classification gradient. Holding these quantities fixed reduces the chance that an apparent
+method gain is actually a data-loading or optimization artifact.
+The report also separates completed evidence from optional evidence. Rows with archived full-
+length metrics are used for the main conclusions. Optional stability or diagnostic rows may remain
+useful for explaining behavior, but they should not be given the same evidentiary status unless their
+artifacts are complete. This distinction is important for the warmup row, which is methodologically
+relevant but should remain optional unless a verified full-length run is included.
+Because the main paper now omits implementation-status labels, readers should infer completion
+from the narrative and the evidence table rather than from an explicit status column. That omission
+is deliberate: the report should read like a paper, not like a tracker. The supplement can still
+preserve run-level completeness details for reproduction and audit.
+
+
+
+
+                                                  10
+5.2 Metrics
+The primary detection metrics are mean average precision at IoU threshold 0.5, mean average preci-
+sion averaged over IoU thresholds from 0.5 to 0.95, precision, recall, and per-class average precision
+where relevant. The main quantitative table should report target-domain detection performance
+on Foggy Cityscapes.
+Mean average precision at 0.5 IoU is useful because it is sensitive to whether objects are detected
+at a practically acceptable localization threshold. The stricter averaged metric adds information
+about localization quality across thresholds and prevents the report from relying only on a lenient
+criterion. Precision and recall clarify how a method changes the detector’s behavior: a method may
+improve recall by finding more objects while reducing precision, or it may preserve precision while
+missing diﬀicult fog-obscured objects. The best method should therefore be interpreted through
+the joint metric pattern, not a single number in isolation.
+Training diagnostics are also necessary because adversarial adaptation can fail through instability
+even when final metrics are unavailable or misleading. The diagnostic curves should include super-
+vised detection losses, image-level adaptation loss, triplet loss when applicable, detached domain-
+classifier loss 𝐿𝑐 , adaptive reversal strength 𝜆adv , and run-completion status. A method that pro-
+duces NaNs, collapses to near-zero detection accuracy, or diverges should be reported as a failure
+rather than omitted.
+The diagnostic metrics play a different role from validation metrics. Validation metrics answer
+whether the final detector works on the target domain. Diagnostic metrics explain how the adapta-
+tion objective behaved while training. This distinction is especially important for AdvGRL because
+the method is explicitly a control rule over adversarial pressure. Without the adaptive-weight and
+classifier-loss curves, the report could state that the final result improved but could not show
+whether the proposed mechanism was active or stable.
+
+5.3 Ablation Matrix
+The ablation study isolates the contribution of each meaningful adaptation component. The source-
+only detector is the reference. Fixed image-level adaptation tests whether ordinary adversarial
+feature alignment helps under this domain shift. Adaptive gradient reversal isolates the main
+proposed training-dynamics change. RainMix-coupled triplet learning tests whether an auxiliary
+synthetic weather domain is useful when it participates in the triplet loss formulation. The full
+component combination tests whether adding the triplet extension to adaptive gradient reversal is
+better than the isolated main method.
+
+ID                                Method                             Purpose
+A1                                Source-only detector               clear-weather supervised
+                                                                     baseline
+A2                                Fixed image-level adaptation       DANN-style adaptation
+                                                                     baseline
+A3                                Adaptive gradient reversal         main contribution isolated
+                                                                     from other extensions
+A4                                RainMix-coupled triplet            evaluates auxiliary-domain
+                                  adaptation                         metric-learning extension
+
+
+
+
+                                                 11
+ID                                Method                            Purpose
+A5                                Adaptive gradient reversal        evaluates full original
+                                  with RainMix-coupled triplet      component combination
+                                  adaptation
+A6                                Adaptive gradient reversal        optional stability comparison
+                                  with warmup
+A7                                Adaptive gradient reversal        strongest completed
+                                  with multi-scale neck             AdvGRL-family setting
+                                  adaptation
+A8                                Adaptive gradient reversal        optional foreground-aware
+                                  with foreground-gated             extension
+                                  multi-scale neck adaptation
+
+
+The main paper should describe these rows by method name. Exact execution commands and
+implementation identifiers belong in the supplement so the report reads like a conference paper
+while remaining reproducible.
+
+5.4 Main Results
+Table 1 summarizes the completed full-length ablations found in the archived training runs. The
+RainMix-coupled triplet-only row is now included, which allows the triplet extension to be evaluated
+directly rather than inferred only from the full component combination.
+
+ID            Method              mAP@0.5       mAP@0.5:0.95            Precision             Recall
+A1            Source-only            0.37841           0.24214           0.74702            0.32365
+              detector
+A2            Fixed                  0.41195           0.25884           0.77726            0.35936
+              image-level
+              adaptation
+A3            Adaptive               0.39839           0.25088           0.67457            0.35689
+              gradient
+              reversal
+A4            RainMix-               0.31183           0.18733           0.73212            0.27307
+              coupled
+              triplet
+              adaptation
+A5            Adaptive               0.34015           0.21109           0.74506            0.28123
+              gradient
+              reversal
+              with
+              RainMix-
+              coupled
+              triplet
+              adaptation
+
+
+
+
+                                                12
+ID            Method               mAP@0.5      mAP@0.5:0.95             Precision            Recall
+A7            Adaptive               0.46665            0.28955           0.72261            0.41646
+              gradient
+              reversal
+              with
+              multi-scale
+              neck
+              adaptation
+A8            Adaptive               0.44293            0.27584           0.74389            0.38448
+              gradient
+              reversal
+              with
+              foreground-
+              gated
+              multi-scale
+              neck
+              adaptation
+
+
+Figure 1 visualizes the same ablation evidence. The main pattern is that fixed image-level adap-
+tation improves over the source-only detector, RainMix-coupled triplet learning degrades target-
+domain detection, and the strongest result comes from adaptive gradient reversal applied to multi-
+scale neck features.
+The current evidence shows that fixed image-level adaptation improves over the source-only detector
+in this run set. The isolated adaptive-gradient row does not exceed the fixed-adaptation row on
+mAP, but it remains central to the methodology because it directly tests adversarial-pressure control
+rather than simply adding more losses. This distinction matters for the report narrative: the
+method contribution is about regulating adversarial training, while the final empirical conclusion
+must follow the completed ablation evidence.
+The isolated RainMix-coupled triplet adaptation underperforms the source-only detector, fixed
+image-level adaptation, and isolated adaptive gradient reversal. The full RainMix-coupled combi-
+nation also underperforms both fixed adaptation and isolated adaptive gradient reversal. Together,
+these results support the failure-analysis narrative: adding the auxiliary triplet signal introduces
+representation pressure that does not improve fog-domain detection in this setting.
+The strongest completed result is the canonical multi-scale neck adaptive-gradient setting. It
+reaches mAP@0.5 of 0.46665 and mAP@0.5:0.95 of 0.28955, with precision 0.72261 and recall
+0.41646. Relative to the source-only detector, this corresponds to an absolute improvement of
+0.08824 mAP@0.5. Relative to fixed image-level adaptation, the gain is 0.05470 mAP@0.5. This is
+the clearest positive empirical result in the current evidence set.
+The precision and recall pattern adds another interpretation. The best multi-scale neck setting has
+lower precision than the fixed image-level adaptation row, but it has substantially higher recall. In
+fog-domain detection, this suggests that the strongest method finds more target-domain objects
+rather than only making the detector more conservative. The accompanying mAP@0.5:0.95 gain
+indicates that this recall improvement is not merely produced by loose detections at the easiest
+overlap threshold. The method improves the target-domain ranking and localization behavior
+
+
+                                                 13
+                                                   Main ablation results on Foggy Cityscapes
+                                                                                                                                             mAP@0.5
+          0.5                                                                                                            0.467               mAP@0.5:0.95
+                                                                                                                                            0.443
+                                        0.412
+                                                       0.398
+          0.4         0.378
+                                                                                                0.340
+                                                                          0.312
+          0.3
+  Score
+
+
+
+
+          0.2
+
+
+          0.1
+
+
+          0.0
+                         A1y                 A2A           A3L                  A4 t                  A5 t                  A7k                 A8L
+                       - o nl             e l D          v G R              r i p le              r i p le                 n ec               vG R
+                Source               -lev             Ad              Mix-t                 Mix-t                 sc   ale            ck   Ad
+                                  age                            Rain                  Rain                  ulti-                d ne
+                              d im                                             RL +                      m                     ate
+                         Fixe                                                                       RL +                  nd-g
+                                                                          AdvG              AdvG                   gro   u
+                                                                                                              Fore
+
+Figure 1: Main ablation results on Foggy Cityscapes. The bars report target-domain detection
+performance for each completed method row. Fixed image-level adaptation improves over the
+source-only baseline, while multi-scale neck adaptive gradient reversal gives the strongest verified
+result.
+
+
+
+
+                                                                          14
+enough to raise both reported mAP measures.
+The foreground-gated extension reaches 0.44293 mAP@0.5, which is also above the source-only and
+fixed image-level baselines. However, it remains below the ungated multi-scale neck setting. This
+result prevents an overly broad conclusion that foreground weighting is always beneficial. Instead,
+the evidence supports a narrower claim: multi-scale neck adaptation with adaptive adversarial
+weighting is beneficial in the completed experiments, while the present objectness gate is a plausible
+but not superior refinement.
+
+Result
+category       Method              mAP@0.5       mAP@0.5:0.95             Precision             Recall
+Best        Adaptive                  0.46665            0.28955           0.72261            0.41646
+verified rungradient
+            reversal
+            with
+            multi-scale
+            neck
+            adaptation
+Nearby      Adaptive                  0.45068            0.27661           0.76088            0.39070
+adaptive-   gradient
+gradient    reversal
+sweep       with
+            multi-scale
+            neck
+            adaptation
+Foreground- Adaptive                  0.44293            0.27584           0.74389            0.38448
+gated       gradient
+extension   reversal
+            with
+            foreground-
+            gated
+            multi-scale
+            neck
+            adaptation
+
+
+Figure 2 shows the completed adaptive-threshold sweep for the multi-scale neck setting. The best
+verified point occurs at alpha 0.75. Nearby settings remain competitive but do not exceed it, which
+supports treating the selected multi-scale neck configuration as the strongest completed result rather
+than as an arbitrary choice.
+The final narrative should therefore distinguish three claims. First, the core ablation table evaluates
+component attribution. Second, the multi-scale neck adaptive-gradient setting is the best verified
+run configuration and provides the strongest quantitative evidence for the AdvGRL-centered ap-
+proach. Third, the RainMix-coupled triplet results are negative in the current evidence set, both
+as an isolated extension and inside the full component combination. More components do not
+automatically imply better adaptation; the ablation evidence should drive the claim strength.
+
+
+
+
+                                                  15
+                                       Multi-scale neck AdvGRL alpha sweep
+                                                                    best verified       mAP@0.5
+                                                                                        mAP@0.5:0.95
+                    0.45
+
+
+                    0.40
+            Score
+
+
+
+                    0.35
+
+
+                    0.30
+
+
+                    0.25
+                           0.650   0.675   0.700   0.725        0.750   0.775   0.800   0.825   0.850
+                                            Adaptive-gradient threshold alpha
+
+Figure 2: Adaptive-threshold sweep for multi-scale neck adaptive gradient reversal. The alpha
+0.75 setting reaches the highest verified mAP@0.5 and mAP@0.5:0.95 among the completed sweep
+points.
+
+
+5.5 Training Dynamics
+Training dynamics are central to this work because the main method changes the adversarial
+signal over time. The report should plot the adaptive reversal strength and detached classifier loss
+over iterations or epochs, then compare those curves against target-domain detection performance.
+These plots explain whether the method behaves as intended: measuring classifier state first and
+then increasing or reducing adversarial pressure accordingly.
+Figure 3 compares target-domain detection metrics across training. It shows that final rankings
+emerge over the full schedule rather than from a single early checkpoint. The multi-scale neck
+adaptive-gradient setting finishes with the strongest target-domain accuracy among the plotted
+methods.
+Figure 4 reports the internal diagnostics recorded for the strongest verified setting. These curves
+expose the adaptive weight, detached classifier probe loss, image-level adaptation loss, and adapta-
+tion scale over iterations. They provide evidence about the mechanism beyond the final detection
+metric and make abrupt instability observable.
+The diagnostic analysis should compare fixed image-level adaptation and adaptive gradient reversal.
+Important questions include whether fixed adaptation applies excessive pressure early in training,
+whether adaptive reversal avoids abrupt destabilization, and whether changes in the classifier loss
+precede changes in detection metrics. For warmup variants, the report should show whether gradual
+adaptation reduces instability or merely delays collapse.
+The training-dynamics section should avoid overinterpreting short sanity runs. Short runs can
+reveal crashes and boundedness, but final ranking should rely on full-length ablations. If platform
+
+
+                                                           16
+                         mAP@0.5 over training                                     mAP@0.5:0.95 over training
+                                                                      0.30
+          0.45
+          0.40                                                        0.25
+
+          0.35
+                                                                      0.20
+          0.30
+  Score
+
+
+
+
+                                                              Score
+          0.25                                                        0.15
+
+          0.20                                                        0.10                      Source-only
+                                                                                                Fixed image-level DA
+          0.15                                                                                  AdvGRL
+                                                                      0.05                      Neck AdvGRL
+          0.10                                                                                  Foreground-gated neck AdvGRL
+                 0      10      20           30    40    50                  0      10        20           30    40       50
+                                     Epoch                                                         Epoch
+
+Figure 3: Target-domain detection performance over the full training schedule. Curves compare
+the source-only detector, fixed image-level adaptation, deepest-feature adaptive gradient reversal,
+multi-scale neck adaptive gradient reversal, and its foreground-gated extension.
+
+
+
+                             Adaptive weight                                             Classifier probe loss
+   0.1450                                                          0.698
+
+   0.1445                                                          0.696
+                                                                   0.694
+   0.1440
+                                                                   0.692
+   0.1435
+                                                                   0.690
+   0.1430
+                       Image-level adaptation loss                                             DA scale
+     0.698                                                            1.04
+     0.696                                                            1.02
+     0.694                                                            1.00
+     0.692                                                            0.98
+     0.690                                                            0.96
+
+                 0   2500 5000 7500 10000 12500 15000 17500                  0   2500 5000 7500 10000 12500 15000 17500
+                              Training iteration                                            Training iteration
+
+Figure 4: Adaptive-gradient diagnostics for the strongest verified multi-scale neck setting. The
+panels show the adaptive reversal weight, detached classifier probe loss, image-level adaptation
+loss, and adaptation scale over training iterations.
+
+
+                                                              17
+differences produce inconsistent early behavior, that observation should be reported as evidence of
+instability rather than treated as noise to ignore.
+
+5.6 Failure Analysis: RainMix and Triplet
+The RainMix-coupled triplet extension should be analyzed explicitly even if it fails. Its expected
+benefit is that an auxiliary synthetic weather domain may provide useful contrast for feature learn-
+ing. However, synthetic rain is not the same shift as fog. If the auxiliary domain contains artifacts
+or weather statistics that are poorly matched to Foggy Cityscapes, it can introduce representation
+pressure that conflicts with the target task.
+The triplet objective depends on the assumption that pushing target features away from rainy
+auxiliary features helps align them with clear-weather source features. That assumption may be
+false if fog and rain share degradation patterns or if the auxiliary images alter low-level statistics
+in a way that does not correspond to semantic domain structure. In that case, the triplet loss can
+push features in an unhelpful direction.
+The failure analysis should consider at least four mechanisms: synthetic-domain mismatch, changed
+batch composition, competition between detection and adaptation objectives, and sensitivity to
+early adversarial pressure. If the RainMix-coupled triplet variant underperforms adaptive gradient
+reversal alone, the report should frame it as an investigated extension with negative or limited
+evidence rather than as a hidden implementation error.
+The isolated RainMix-coupled triplet row is especially informative because it performs worse than
+the source-only detector. This means the auxiliary triplet signal is not merely failing to add a small
+improvement; it is actively associated with lower target-domain detection quality in the completed
+run. The full combination improves over the isolated triplet row but remains below fixed image-level
+adaptation and below the AdvGRL-family results. That pattern suggests that adaptive adversarial
+training partially offsets harmful auxiliary pressure but does not turn the triplet extension into a
+beneficial component.
+This negative result should be reported carefully. It does not prove that all synthetic auxiliary
+domains are harmful. It does show that this particular auxiliary-domain formulation, under this
+training protocol and this target fog shift, should not be presented as the central contribution. The
+strongest conclusion remains AdvGRL-centered and feature-level-specific, while RainMix-coupled
+triplet learning becomes a documented limitation and a useful direction for future redesign.
+
+5.7 Qualitative Results
+Qualitative results should compare representative Foggy Cityscapes images across the source-only
+detector, fixed image-level adaptation, adaptive gradient reversal, and the full component combina-
+tion. The figure set should include both success and failure cases. Success cases may show improved
+detection under reduced contrast or fog occlusion. Failure cases may show missed small objects,
+false positives in fog texture, poor localization, or instability introduced by auxiliary objectives.
+The qualitative section should support, not replace, quantitative evidence. Images should be se-
+lected from archived evaluation outputs with the same confidence thresholds where possible. Cap-
+tions should explain what changed between methods and whether the visual behavior matches the
+ablation table.
+Until the qualitative grid is exported, Figure 5 provides a compact precision–recall view of the
+
+
+                                                 18
+completed ablations. This plot helps interpret whether mAP differences are associated with broader
+recall gains or only with precision shifts.
+
+
+                        0.80
+                                           Precision-recall trade-off across ablations
+
+                        0.78                                              A2
+
+                        0.76
+                                           A5              A1                          A8
+                        0.74         A4
+                                                                                                A7
+            Precision
+
+
+
+
+                        0.72
+
+                        0.70
+
+                        0.68                                              A3
+
+                        0.66
+
+                        0.64
+                           0.250   0.275        0.300   0.325     0.350        0.375    0.400   0.425
+                                                                Recall
+
+Figure 5: Precision–recall trade-off across completed ablations. Labels identify the ablation rows
+from the main results table. The best multi-scale neck adaptive-gradient setting improves recall
+relative to the source-only and fixed-adaptation rows while preserving competitive precision.
+
+
+5.8 Reproducibility Artifacts
+The main report should summarize reproducibility, while detailed commands and paths remain
+in the supplement. Each ablation should archive its exact execution command, environment in-
+formation, final metrics, adaptation diagnostics, validation log, trained-checkpoint identifiers, and
+configuration files. The final report should only cite numbers that trace to archived artifacts.
+A complete supplement should allow another reader to identify the code revision, data definitions,
+training configuration, run directory, metric source, and figure-generation source for each reported
+result. This is especially important because the methodology includes negative results: failed or
+unstable runs must be reproducible, not only successful ones.
+
+
+6. Discussion
+6.1 AdvGRL as Training-Dynamics Control
+The results indicate that adaptive reversal is most effective when it is paired with the appropri-
+ate representation level. Applying AdvGRL only at the deepest backbone representation reaches
+0.39839 mAP@0.5, below the fixed image-level adaptation baseline. In contrast, applying the same
+adaptive principle across the multi-scale neck reaches 0.46665 mAP@0.5, the strongest verified
+
+
+                                                            19
+result. This difference suggests that adversarial-weight control alone is insuﬀicient: the detector
+features receiving that signal also determine whether alignment benefits target-domain detection.
+The multi-scale neck contains representations used directly by the detection head for objects at
+different spatial scales. Aligning these features can therefore influence fog-domain detection more
+directly than aligning only one deep representation. The result supports an interpretation of Ad-
+vGRL as training-dynamics control whose value depends on where adaptation gradients enter the
+detector. However, because the evidence consists of completed single-run configurations rather than
+repeated-seed estimates, this interpretation should be treated as a supported hypothesis rather than
+a universal claim.
+
+6.2 Component-Wise Design as Experimental Design
+The component-wise design prevents gains from being incorrectly attributed to the full method.
+Fixed image-level adaptation improves over source-only training by 0.03354 mAP@0.5, while the
+isolated deepest-feature AdvGRL setting does not improve over fixed adaptation. The best multi-
+scale neck AdvGRL setting then improves over fixed adaptation by 0.05470. These comparisons
+show why method names alone are inadequate: adaptive weighting, representation level, auxiliary-
+domain learning, and foreground gating each alter optimization differently.
+Separating these components also exposes negative evidence. The RainMix-coupled triplet objective
+reduces performance to 0.31183 mAP@0.5 without AdvGRL and 0.34015 when combined with
+AdvGRL. Likewise, foreground gating reaches 0.44293, which remains above the source-only and
+fixed-adaptation baselines but below ungated multi-scale neck AdvGRL. Reporting these outcomes
+preserves causal clarity and avoids presenting every added component as beneficial.
+
+6.3 Why the Full Component Combination Is Not the Best Method
+The full component combination underperforms the best isolated configuration because additional
+objectives need not produce complementary gradients. Detection learning, adversarial domain
+confusion, and triplet metric learning compete over the same representation. When the auxiliary
+rainy domain does not accurately model the target fog shift, the triplet objective can encourage
+separation directions that conflict with detection-relevant alignment.
+The results therefore distinguish methodological completeness from empirical quality. The full
+combination is useful as an ablation because it tests the interaction among all originally considered
+components. It should not be selected as the final method merely because it contains more compo-
+nents. The best verified evidence instead favors adaptive multi-scale neck alignment without the
+RainMix-coupled triplet objective or foreground gate.
+
+6.4 Practical Lessons
+Four practical lessons follow from the completed experiments. First, adaptation strength and
+adaptation location must be evaluated jointly; adaptive weighting at one feature level does not
+guarantee improvement. Second, full-length ablations are necessary because short sanity runs
+reveal wiring and instability but cannot reliably rank methods. Third, synthetic auxiliary domains
+require task-specific validation before they are incorporated into metric-learning objectives. Fourth,
+diagnostic logging of domain-classifier loss, adaptive weight, and adaptation losses is part of the
+experimental method because it makes collapse and harmful objective interactions observable.
+
+
+
+                                                 20
+For practitioners, the results argue against treating domain adaptation as a single switch. The same
+detector can respond differently depending on whether the adaptation signal enters a deep feature,
+a multi-scale neck representation, or a foreground-weighted spatial map. The strongest setting in
+this report is not the one with the largest number of components; it is the one where the adaptive
+adversarial signal is placed at detector features that directly support multi-scale prediction.
+For researchers, the results suggest that future work should evaluate adaptive weighting and feature
+placement together. A paper that compares only fixed and adaptive adversarial weights at one fea-
+ture level may miss the interaction that dominates the final result. Similarly, a paper that evaluates
+only the final full component combination may hide the fact that one extension is helpful while
+another is harmful. The component-wise ablation design is therefore not just an implementation
+convenience but a necessary part of the scientific argument.
+Finally, the report shows the value of preserving negative results. The RainMix-coupled triplet ex-
+tension was motivated by a plausible representation-learning idea, but the completed evidence does
+not support it for this fog-domain task. Reporting that failure improves the final contribution be-
+cause it narrows the claim to what the evidence actually supports: adaptive multi-scale adversarial
+alignment, not a general claim that every auxiliary weather objective improves detection.
+
+6.5 Evidence Strength and Claim Boundaries
+The strongest claim supported by the completed results is that adaptive gradient reversal combined
+with multi-scale neck adaptation improves target-domain detection over both the source-only de-
+tector and fixed image-level adaptation in the archived run set. This claim is directly supported
+by the main ablation table, the alpha sweep, and the training curves. The gain is large enough to
+matter in the context of the experiment: 0.08824 absolute mAP@0.5 over source-only training and
+0.05470 over fixed image-level adaptation.
+A weaker claim is that adaptive weighting alone is beneficial. The evidence does not support that
+broad statement because the isolated deepest-feature AdvGRL row is below the fixed image-level
+adaptation row. The correct interpretation is conditional: adaptive weighting becomes most useful
+when paired with the appropriate feature level. This distinction should remain visible in the final
+report because it prevents the narrative from overstating the main method.
+The weakest claim is that the full component combination is the best method. The evidence
+contradicts that claim. The full RainMix-coupled combination underperforms the best multi-scale
+neck result and remains below fixed adaptation. The final report should therefore avoid selecting
+the full combination as the headline method merely because it includes all proposed components.
+The headline method should be the best supported method, not the most complex one.
+The report also avoids a state-of-the-art claim. The experiments are single-domain and appear to
+be single-run ablations rather than repeated-seed estimates. They are suﬀicient for a controlled
+final-report conclusion about this project, but not suﬀicient for a broad benchmark claim against all
+domain-adaptive detectors. This boundary strengthens the paper because it makes the empirical
+scope clear.
+
+6.6 Implications for Future Domain-Adaptive Detectors
+The results suggest that future domain-adaptive detectors should treat feature-level selection as
+a first-class design choice. Weather shift affects different parts of the representation hierarchy in
+
+
+
+                                                 21
+different ways. Low-level contrast and texture changes may influence spatial features, while higher-
+level semantic features may already be partly stable. A multi-scale detector therefore provides
+several possible adaptation sites, and the best site may depend on the target domain and the
+object sizes of interest.
+Adaptive weighting should also be studied as a control mechanism rather than as a standalone
+improvement. The value of AdvGRL is not that it always increases the adversarial signal; it is
+that it makes the signal depend on the domain-classifier state. Future work could extend this idea
+by using smoother schedules, per-layer adaptive weights, uncertainty-aware domain classifiers, or
+separate control rules for object and background regions.
+The negative RainMix result points to a broader lesson about auxiliary domains. Synthetic auxiliary
+data can be useful only if the induced representation geometry matches the target task. A rainy
+auxiliary domain may be visually plausible but still geometrically wrong for fog adaptation. Future
+work should therefore validate auxiliary-domain assumptions through feature analysis, not only by
+adding the auxiliary loss to the final model.
+The objectness-gated result suggests another direction. Foreground-aware adaptation remains
+plausible, but the current gate may be too dependent on detector confidence. A future method
+could combine objectness gates with uncertainty estimates, teacher-student consistency, or class-
+conditional alignment so that foreground regions are emphasized without discarding useful back-
+ground context. The present report provides a baseline for that future work by showing that simple
+gating is competitive but not superior to ungated multi-scale neck adaptation.
+
+6.7 Relationship Between Quantitative and Qualitative Evidence
+The current report is primarily quantitative because the archived metrics provide the strongest
+evidence. Nevertheless, qualitative detection examples remain useful for explaining how the metrics
+arise. A recall gain may correspond to recovering small vehicles in dense fog, while a precision loss
+may correspond to more false positives in low-contrast background regions. Qualitative grids can
+make those behaviors visible to readers who cannot infer them from mAP alone.
+Qualitative evidence should be selected conservatively. The figure should include representative
+success and failure cases rather than only the best-looking examples. If the multi-scale neck method
+improves recall, the qualitative section should show whether it recovers objects missed by the
+baseline. If RainMix-coupled triplet learning harms performance, the section should show whether
+the harm appears as missed detections, poor localization, or false positives. The visual analysis
+should therefore serve the same evidence-bounded narrative as the tables.
+Until a complete qualitative grid is added, the precision–recall plot helps bridge quantitative and
+behavioral interpretation. It shows that the best multi-scale neck setting trades some precision for
+substantially better recall relative to the fixed-adaptation row. That trade-off is consistent with
+an adaptation method that finds more target-domain objects under fog, while the mAP@0.5:0.95
+improvement indicates that the gain is not limited to low-quality detections.
+
+6.8 Reproducibility as Part of the Contribution
+Reproducibility is unusually important for this report because the method includes both positive
+and negative results. Positive results require evidence so that the reported gain is credible. Negative
+results require evidence so that a failed extension is not mistaken for an accidental omission or an
+
+
+
+                                                  22
+undocumented implementation problem. The supplement therefore functions as part of the scientific
+record rather than as a convenience appendix.
+The report follows three reproducibility principles. First, every metric in the main table should
+trace to an archived result file. Second, implementation commands and file-level details should
+stay in the supplement so that the main report remains readable as an academic paper. Third,
+diagnostic logs should be preserved for adaptation runs because final mAP alone cannot explain
+adversarial training behavior.
+This structure also supports later revision. If additional warmup, fixed neck-all, or multi-seed runs
+are completed, they can be added to the supplement and then promoted into the main report
+only when their artifacts are complete. The same rule applies to qualitative figures and checkpoint
+hashes. Evidence enters the main narrative only after it can be traced.
+The final report therefore contributes more than a best metric. It contributes a controlled ex-
+perimental record showing which components helped, which failed, and which remain optional.
+That record is valuable because domain-adaptive detection methods often fail through interactions
+among losses, feature levels, and training schedules rather than through a single obvious error.
+The same record also explains why the main results table omits engineering-status labels. The
+table is intended to communicate scientific results, not artifact bookkeeping. Run status, paths,
+commands, and file-level evidence remain in the supplement and evidence tables, where they can
+be audited without making the main report read like an implementation log. This separation keeps
+the main paper concise while preserving traceability.
+
+
+7. Limitations
+7.1 Domain Scope
+The main domain pair is Cityscapes to Foggy Cityscapes. This is an appropriate test bed for
+weather-domain adaptation, but it does not cover every real driving condition. A method that im-
+proves clear-to-fog adaptation may behave differently under night scenes, snow, rain, low-resolution
+cameras, or a different city distribution. The report therefore avoids claiming general weather ro-
+bustness beyond the studied setting.
+The single-domain scope also affects the interpretation of RainMix. The auxiliary rainy domain
+is evaluated only as a negative domain for fog adaptation. Its failure here does not mean rainy
+auxiliary data can never help. It means that this RainMix-coupled triplet formulation did not help
+this fog-domain detection problem under the completed training protocol.
+
+7.2 Seed and Compute Constraints
+The completed ablations are treated as verified runs, but they should not be interpreted as repeated-
+seed confidence intervals. Deep detector training and adversarial adaptation can be sensitive to
+initialization, data order, hardware kernels, and platform differences. Multi-seed evaluation would
+be necessary before making a stronger statistical claim about effect size.
+Compute budget also limits the breadth of hyperparameter search. The alpha sweep provides useful
+evidence around multi-scale neck AdvGRL, but it does not exhaust all possible base reversal weights,
+thresholds, feature combinations, or warmup schedules. The reported best setting is therefore the
+best verified setting in the completed run set, not a globally optimized configuration.
+
+
+                                                 23
+7.3 Auxiliary-Domain Limitations
+RainMix is synthetic and may not represent the target fog domain. The triplet formulation assumes
+that target fog features should be closer to source clear-weather features than to auxiliary rainy
+features. That assumption is plausible but not guaranteed. If the auxiliary domain differs in the
+wrong dimensions, the triplet loss can introduce harmful representation pressure.
+The current report does not include a full feature-space analysis of RainMix, source, and target
+clusters. Such an analysis could clarify whether the auxiliary domain is geometrically suitable
+for triplet learning. Without it, the negative RainMix result should be interpreted empirically:
+the extension underperforms in the completed ablations, but the precise feature-space mechanism
+remains a topic for future work.
+
+7.4 Diagnostic and Artifact Limitations
+Short sanity runs are useful for detecting crashes, NaNs, or wiring errors, but they are not reliable for
+final method ranking. The main conclusions therefore rely on full-length ablations where available.
+Optional rows without full artifacts should remain marked as optional rather than being used to
+support the central claim.
+The report also depends on archived CSV logs for metrics and diagnostics. This is stronger than
+relying on memory or screenshots, but it still requires careful artifact management. A complete
+final package should preserve environment metadata, validation logs, checkpoint identifiers, and
+figure-generation scripts so that every reported number can be reproduced or audited.
+
+7.5 Claim Boundaries
+No state-of-the-art claim is made from the current evidence because the study is single-domain
+and currently reports single-run ablations. The supported claim is narrower and more defensible:
+adaptive gradient reversal with multi-scale neck adaptation is the strongest verified method in this
+project and improves over the source-only and fixed image-level adaptation baselines on Foggy
+Cityscapes.
+This boundary is intentional. It keeps the report aligned with the evidence and avoids overstating
+the contribution. The value of the work is the controlled ablation record and the AdvGRL-centered
+analysis, including both positive and negative component findings.
+The limitation does not weaken the main result; it defines the conditions under which the result
+should be read. Within the completed Cityscapes-to-Foggy-Cityscapes evidence, adaptive multi-
+scale neck alignment is the strongest verified method. Outside that evidence, the method remains
+a promising hypothesis that requires broader validation.
+
+
+8. Conclusion
+This report asked whether adaptive adversarial weighting can improve or stabilize YOLO-G domain
+adaptation from clear-weather Cityscapes to Foggy Cityscapes. The completed evidence supports
+a qualified answer. Fixed image-level adaptation improves over the source-only detector, but the
+strongest result comes from adaptive gradient reversal applied to multi-scale neck features. That
+setting reaches 0.46665 mAP@0.5, improving by 0.08824 over source-only training and by 0.05470
+over fixed image-level adaptation.
+
+
+                                                   24
+The evidence also shows that more components do not automatically improve domain adaptation.
+The RainMix-coupled triplet extension performs poorly as an isolated extension and remains below
+the fixed-adaptation baseline when combined with AdvGRL. The foreground-gated neck extension
+is stronger than the baseline rows but does not exceed ungated multi-scale neck AdvGRL. The
+final claim should therefore center on adaptive multi-scale adversarial alignment, not on the full
+component combination.
+Future work should evaluate this conclusion with multiple random seeds, additional weather and
+domain pairs, stronger auxiliary-domain generation, and more systematic schedules for adversarial
+weighting. The current report provides a reproducible ablation framework and an evidence-bounded
+conclusion: AdvGRL is useful when paired with the right detector features, while RainMix-coupled
+triplet learning is a negative or limited extension in the current fog-domain setting.
+The final takeaway is therefore methodological rather than merely numerical. The project shows
+that an adaptive adversarial rule should be evaluated together with feature placement, diagnostic
+behavior, and component interactions. The best result is not the largest collection of losses, but the
+configuration whose training signal matches the detector features most relevant to target-domain
+prediction.
+For a final-report setting, this conclusion is useful because it gives a clear engineering lesson without
+overstating the scope. The study began from a broad set of possible domain-adaptation components,
+but the completed evidence narrows the defensible contribution. Adaptive gradient reversal is most
+convincing when it is applied to multi-scale detector features, while the auxiliary triplet branch
+should be treated as an investigated but unsuccessful extension. This distinction keeps the final
+method aligned with the ablation evidence.
+The report also demonstrates why a domain-adaptation project should retain diagnostic logs. De-
+tection metrics identify the final winner, but diagnostic curves show whether the adversarial mecha-
+nism was active, bounded, and interpretable during optimization. In future work, those diagnostics
+can guide schedule design, feature-level selection, and early stopping decisions before expensive full
+training runs are repeated.
+
+
+References
+References are generated from the bibliography file during PDF export. The current bibliography
+includes verified metadata for Cityscapes, Foggy Cityscapes, domain-adversarial training, YOLOv5,
+the YOLO-G repository citation, and the arXiv source for the adaptive-gradient foggy-weather
+detection method.
+
+
+Appendix A: Reproducibility Notes
+Exact execution commands, configuration paths, and artifact manifests are maintained in the sup-
+plementary package rather than the main report body. The main report reports methods and
+results; the supplement preserves implementation-level reproduction details.
+
+
+Appendix B: Supporting Tables
+Dataset Summary
+
+
+                                                   25
+                                           Labels used in
+Dataset           Role                          training?         Image count    Notes
+Cityscapes        source                             yes           recorded in   clear-weather
+                                                                   supplement    driving
+Foggy             target/eval         no for DA training;          recorded in   foggy target
+Cityscapes                                    yes for val          supplement    domain
+RainMix           auxiliary                           no           recorded in   synthetic rainy
+                                                                   supplement    auxiliary
+                                                                                 domain
+
+
+Final Ablation Results
+
+ID           Method           mAP@0.5     mAP@0.5:0.95      Precision        Recall   Notes
+A1           Source-            0.37841       0.24214        0.74702        0.32365   baseline
+             only
+A2           Fixed              0.41195       0.25884        0.77726        0.35936   original
+             image-                                                                   adapta-
+             level                                                                    tion
+             adapta-                                                                  method
+             tion
+A3           Adaptive           0.39839       0.25088        0.67457        0.35689   isolated
+             gradient                                                                 main
+             reversal                                                                 method
+A4           RainMix-           0.31183       0.18733        0.73212        0.27307   negative
+             coupled                                                                  metric-
+             triplet                                                                  learning
+             adapta-                                                                  extension
+             tion
+A5           Adaptive           0.34015       0.21109        0.74506        0.28123   full
+             gradient                                                                 original
+             reversal                                                                 compo-
+             with                                                                     nent
+             RainMix-                                                                 combina-
+             coupled                                                                  tion
+             triplet
+             adapta-
+             tion
+A7           Adaptive           0.46665       0.28955        0.72261        0.41646   best
+             gradient                                                                 verified
+             reversal                                                                 run
+             with
+             multi-
+             scale neck
+             adapta-
+             tion
+
+
+
+                                                26
+ID            Method         mAP@0.5      mAP@0.5:0.95         Precision           Recall   Notes
+A8            Adaptive          0.44293         0.27584          0.74389         0.38448    optional
+              gradient                                                                      foreground-
+              reversal                                                                      aware
+              with                                                                          extension
+              foreground-
+              gated
+              multi-
+              scale neck
+              adapta-
+              tion
+
+
+Appendix C: Evidence Checklist
+     □ Every final metric copied from archived results.csv or validation log.
+     □ Every DA diagnostic copied from archived da_losses.csv.
+     □ Every citation verified.
+     □ Base YOLO-G/YOLOv5 code cited in body.
+     □ Abstract <=300 words.
+     □ PDF >=30 pages.
+     □ Supplement package opens and includes reproduction instructions.
+
+
+Appendix D: Figure Interpretation Guide
+This appendix records how each generated figure should be interpreted when reading the main
+report. It is included to make the connection between archived metrics, plotted evidence, and
+written claims explicit.
+
+D.1 Main Ablation Figure
+The main ablation figure compares the completed method rows using the two reported mAP metrics.
+It should be read together with the main results table. The key comparison is not simply which bar is
+tallest, but which component change explains the movement from one row to the next. Source-only
+training establishes the unadapted detector. Fixed image-level adaptation tests whether ordinary
+adversarial alignment helps. The deepest-feature adaptive-gradient row tests the adaptive weighting
+mechanism without the later multi-scale neck change. The RainMix-coupled rows test whether the
+auxiliary triplet extension helps or harms.
+The figure supports three claims. First, fixed image-level adaptation is beneficial relative to source-
+only training. Second, the RainMix-coupled triplet extension is negative in the completed evidence
+set. Third, the strongest result is multi-scale neck adaptive gradient reversal, not the full component
+combination. These claims are repeated in the main text because they are central to the report’s
+argument.
+
+
+
+
+                                                  27
+D.2 Alpha Sweep Figure
+The alpha sweep figure focuses on the adaptive-gradient threshold for the multi-scale neck setting.
+It shows that alpha 0.75 is the strongest verified point among the completed sweep values. The
+purpose of this figure is not to claim that alpha 0.75 is globally optimal for every detector or
+dataset. Its purpose is narrower: it justifies why the report identifies this run as the best verified
+configuration in the archived evidence.
+Nearby settings remain competitive, which suggests that the method is not dependent on a single
+isolated accident. However, the completed evidence still favors the alpha 0.75 setting. Future
+work should repeat this sweep across multiple seeds before treating the exact threshold as a stable
+hyperparameter recommendation.
+
+D.3 Training-Curve Figure
+The training-curve figure plots target-domain validation metrics across epochs for representative
+methods. It helps distinguish final performance from early-training behavior. A method can look
+promising early and then plateau, or it can improve later after the adaptation signal stabilizes.
+This is why the report avoids ranking methods from short sanity runs.
+The curves also help evaluate whether the final result is consistent with the trajectory. A method
+that reaches a strong final mAP after a gradual upward trend is easier to trust than a method
+whose final value is an unexplained spike. The curve does not replace repeated-seed validation, but
+it provides useful evidence that the reported endpoint belongs to a plausible training trajectory.
+
+D.4 Diagnostic Figure
+The diagnostic figure is specific to the adaptive-gradient mechanism. It records internal quantities
+that are not visible in the detection metrics: the adaptive reversal weight, the detached classifier
+probe loss, the image-level adaptation loss, and the adaptation scale. These curves are important
+because AdvGRL is a training-dynamics method. If the adaptive weight were constant or unstable,
+the method would not be behaving as intended even if the final metric were acceptable.
+The diagnostic figure should therefore be read as mechanism evidence. It answers whether the
+adaptive control variables were logged and bounded during training. It does not by itself prove
+that the mechanism caused the final mAP gain, but it supports the interpretation that the reported
+method was active and traceable.
+
+D.5 Precision–Recall Figure
+The precision–recall figure summarizes how each method changes detector behavior. The best
+multi-scale neck method improves recall relative to the source-only and fixed-adaptation rows while
+preserving competitive precision. This helps explain why mAP improves: the detector appears to
+recover more target-domain objects rather than merely becoming more conservative.
+The same figure also shows why no single metric should dominate the report. Fixed image-level
+adaptation has strong precision, while the best multi-scale neck method has stronger recall and
+higher mAP. The final conclusion therefore depends on the full metric pattern rather than only one
+plotted coordinate.
+
+
+
+
+                                                 28
+Appendix E: Reproducibility Interpretation
+The supplement records implementation-level details that are intentionally absent from the main
+prose. This separation is important. A conference-style report should describe methods, evidence,
+and conclusions in terms that are readable without source-code identifiers. A reproducibility pack-
+age, however, must preserve exact commands, run names, paths, and configuration details.
+The project therefore uses a two-layer reporting structure. The main report presents the scientific
+argument: what was tested, what improved, what failed, and what conclusion follows. The supple-
+ment preserves the operational record: how each run was launched, where each metric came from,
+and which artifacts support the plots and tables. Both layers are necessary. Removing implemen-
+tation details from the main report improves readability, while preserving them in the supplement
+prevents the paper from becoming unverifiable.
+The same rule applies to negative results. A failed method should not disappear simply because
+it does not support the headline claim. The RainMix-coupled triplet rows remain in the report
+because they explain why the final contribution is AdvGRL-centered rather than full-component-
+centered. Their commands and artifacts remain in the supplement so that readers can audit the
+failure instead of treating it as an unsupported assertion.
+Finally, any future revision should update the report only after updating the evidence table. If a
+new warmup run, fixed neck-all run, qualitative grid, or multi-seed evaluation is added, the archived
+artifact should be recorded first. The main report should then be revised to reflect the new evidence.
+This workflow keeps the final PDF aligned with the experimental record.
+This reproducibility separation also protects the citation format. The main report now uses a
+numbered citation style so that source references appear compactly in the text and the bibliography
+is ordered consistently in the generated output. That format is better suited to a technical computer-
+vision final report than an author–date style when many method, dataset, and software references
+appear close together in the related-work section.
+For the reader, the numbered style also makes the evidence chain easier to scan. Dataset citations,
+detector citations, and domain-adaptation citations remain visible, but they do not interrupt the
+main explanation of the method. This is useful in this report because the contribution is not a
+literature survey alone; the central task is to connect the prior methods to the completed ablation
+evidence. A compact citation format lets the report keep that connection readable while still
+preserving proper attribution for Cityscapes, Foggy Cityscapes, YOLOv5, YOLO-G, DANN, and
+the foggy-weather AdvGRL reference.
+The final PDF should therefore be treated as the submission copy, while the Markdown source
+remains the editable copy. If the report is later moved to Overleaf, the same citation style file
+should be uploaded with the generated TeX and bibliography. Otherwise, Overleaf may fall back
+to a different citation style and produce output that no longer matches the local PDF.
+[1]    M. Cordts et al., “The cityscapes dataset for semantic urban scene understanding,” in Pro-
+       ceedings of the IEEE conference on computer vision and pattern recognition, 2016, pp. 3213–
+       3223.
+[2]    C. Sakaridis, D. Dai, and L. Van Gool, “Semantic foggy scene understanding with syn-
+       thetic data,” International Journal of Computer Vision, vol. 126, pp. 973–992, 2018, doi:
+       10.1007/s11263-018-1072-8.
+[3]    J. Wei and Q. Wang, YOLO-G: Improved YOLO for cross domain object detection. (2023).
+
+
+                                                 29
+[4]   G. Jocher and contributors, YOLOv5 by ultralytics. (Nov. 22, 2022). doi: 10.5281/zen-
+      odo.3908559.
+[5]   Y. Ganin et al., “Domain-adversarial training of neural networks,” Journal of Machine
+      Learning Research, vol. 17, no. 59, pp. 1–35, 2016.
+[6]   J. Li, R. Xu, J. Ma, Q. Zou, J. Ma, and H. Yu, “Domain adaptive object detection for
+      autonomous driving under foggy weather.” 2022. Available: https://arxiv.org/abs/2210.151
+      76
+
+
+
+
+                                             30
+

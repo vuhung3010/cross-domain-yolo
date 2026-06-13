@@ -1,0 +1,70 @@
+Downloading https://ultralytics.com/assets/Arial.ttf to /root/.config/Ultralytics/Arial.ttf...
+/usr/local/lib/python3.12/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+[34m[1mval_GRL: [0mdata=/root/yolo-g-modal/domain/city_foggycity.yaml, weights=['/root/yolo-g-modal/runs/train/sanity_pr1_baseline/weights/best.pt'], batch_size=8, imgsz=640, conf_thres=0.001, iou_thres=0.6, task=val, device=0, workers=8, single_cls=False, augment=False, verbose=True, save_txt=False, save_hybrid=False, save_conf=False, save_json=False, project=/root/yolo-g-modal/runs/per_class_val, name=sanity_pr1_baseline, exist_ok=True, half=False, dnn=False, soft=False
+YOLOv5 🚀 f47d8cd torch 2.8.0+cu129 CUDA:0 (NVIDIA L4, 22563.125MB)
+
+Fusing layers... 
+Model Summary: 367 layers, 46145973 parameters, 0 gradients, 107.8 GFLOPs
+
+[34m[1mval: [0mScanning '/mnt/cityscape/labels/val_foggy.cache' images and labels... 500 found, 0 missing, 8 empty, 0 cor[0m
+[34m[1mval: [0mScanning '/mnt/cityscape/labels/val_foggy.cache' images and labels... 500 found, 0 missing, 8 empty, 0 cor[0m
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/frankfurt_000001_016273.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/frankfurt_000001_017101.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/frankfurt_000001_077434.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000026_000019.jpg: 2 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000029_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000049_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000108_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000140_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000141_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000142_000019.jpg: 1 duplicate labels removed
+[34m[1mval: [0mWARNING: /mnt/cityscape/images/val_foggy/munster_000167_000019.jpg: 1 duplicate labels removed
+
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:   0%|          | 0/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:   2%|▏         | 1/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:   3%|▎         | 2/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:   5%|▍         | 3/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:   6%|▋         | 4/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  10%|▉         | 6/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  13%|█▎        | 8/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  14%|█▍        | 9/63 [
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  17%|█▋        | 11/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  21%|██        | 13/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  24%|██▍       | 15/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  27%|██▋       | 17/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  30%|███       | 19/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  33%|███▎      | 21/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  37%|███▋      | 23/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  40%|███▉      | 25/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  43%|████▎     | 27/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  46%|████▌     | 29/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  49%|████▉     | 31/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  52%|█████▏    | 33/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  56%|█████▌    | 35/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  59%|█████▊    | 37/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  62%|██████▏   | 39/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  65%|██████▌   | 41/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  68%|██████▊   | 43/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  71%|███████▏  | 45/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  75%|███████▍  | 47/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  78%|███████▊  | 49/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  81%|████████  | 51/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  84%|████████▍ | 53/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  87%|████████▋ | 55/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  90%|█████████ | 57/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  94%|█████████▎| 59/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95:  97%|█████████▋| 61/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95: 100%|██████████| 63/63 
+               Class     Images     Labels          P          R     mAP@.5 mAP@.5:.95: 100%|██████████| 63/63 
+                 all        500      10168      0.819      0.347      0.412      0.263
+                 bus        500         98      0.876      0.316      0.383      0.324
+             bicycle        500       1171      0.779      0.325       0.39      0.204
+                 car        500       4667      0.927      0.432       0.58      0.405
+          motorcycle        500        149      0.783      0.268      0.315      0.171
+              person        500       3415      0.781        0.4      0.483      0.276
+               rider        500        552      0.727      0.462      0.518      0.318
+               train        500         23      0.943      0.304      0.309      0.145
+               truck        500         93      0.735      0.269      0.316      0.257
+Speed: 0.1ms pre-process, 5.3ms inference, 1.9ms NMS per image at shape (8, 3, 640, 640)
+Results saved to [1m/root/yolo-g-modal/runs/per_class_val/sanity_pr1_baseline[0m
